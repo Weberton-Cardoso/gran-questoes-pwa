@@ -67,6 +67,10 @@
         <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M6 2h9l5 5v13a2 2 0 01-2 2H6a2 2 0 01-2-2V4a2 2 0 012-2zm8 1.5V8h4.5z"/></svg>
         <span>Editais</span>
       </a>
+      <a href="#/editais/importar" class="nav-item" data-route="editais/importar">
+        <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 3a1 1 0 011 1v9.6l3.3-3.3a1 1 0 111.4 1.4l-5 5a1 1 0 01-1.4 0l-5-5a1 1 0 111.4-1.4l3.3 3.3V4a1 1 0 011-1zM5 19a1 1 0 011-1h12a1 1 0 110 2H6a1 1 0 01-1-1z"/></svg>
+        <span>Importar Edital</span>
+      </a>
       <a href="#/simulados" class="nav-item" data-route="simulados">
         <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 2l7 4v6c0 5-3.4 8.6-7 10-3.6-1.4-7-5-7-10V6z"/></svg>
         <span>Simulados</span>
@@ -110,9 +114,12 @@
 
 <!-- Chart.js via CDN -->
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<!-- pdf.js via CDN — usado apenas na Importação Inteligente de Editais (upload de PDF) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 
 <script src="database.js"></script>
 <script src="charts.js"></script>
+<script src="editais.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

@@ -352,6 +352,80 @@ tbody tr.clickable{ cursor:pointer; }
 .progress-ring-wrap{ display:flex; align-items:center; gap:18px; }
 .progress-ring-num{ font-family:var(--font-mono); font-size:28px; font-weight:700; color:var(--gold); }
 
+/* quadro kanban do edital (colunas = disciplinas, cards = tópicos) */
+.kanban-toolbar{
+  display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:16px;
+}
+.kanban-toolbar select{
+  background:var(--surface); border:1px solid var(--border); color:var(--text);
+  padding:10px 12px; border-radius:var(--radius-sm); font-size:13.5px;
+}
+.kanban-board{
+  display:flex; gap:14px; overflow-x:auto; padding-bottom:8px; align-items:flex-start;
+}
+.kanban-col{
+  background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+  min-width:270px; max-width:270px; flex:0 0 auto; padding:12px; max-height:70vh; display:flex; flex-direction:column;
+}
+.kanban-col-head{
+  display:flex; align-items:center; justify-content:space-between; gap:8px;
+  margin-bottom:10px; padding:0 2px;
+}
+.kanban-col-head h3{ font-family:var(--font-display); font-size:14px; margin:0; }
+.kanban-col-count{
+  background:var(--surface-2); color:var(--text-muted); font-size:11.5px; font-weight:700;
+  border-radius:999px; padding:2px 8px;
+}
+.kanban-col-body{ overflow-y:auto; flex:1; display:flex; flex-direction:column; gap:10px; padding:2px; border-radius:var(--radius-sm); }
+.kanban-col-body.drag-over{ background:var(--gold-soft); outline:2px dashed var(--gold); }
+.kanban-col-empty{ color:var(--text-faint); font-size:12.5px; text-align:center; padding:14px 4px; }
+.kanban-card{
+  background:var(--surface-2); border:1px solid var(--border); border-left:3px solid var(--text-faint);
+  border-radius:var(--radius-sm); padding:10px 12px; cursor:grab; transition:box-shadow .15s var(--ease);
+}
+.kanban-card:active{ cursor:grabbing; }
+.kanban-card.dragging{ opacity:.5; }
+.kanban-card.status-em_estudo{ border-left-color:var(--info); }
+.kanban-card.status-em_revisao{ border-left-color:var(--gold); }
+.kanban-card.status-dominado{ border-left-color:var(--success); }
+.kanban-card-head{ margin-bottom:8px; }
+.kanban-card-nome{ font-weight:600; font-size:13.5px; }
+.kanban-status-select{
+  width:100%; background:var(--surface); border:1px solid var(--border); color:var(--text);
+  padding:6px 8px; border-radius:var(--radius-sm); font-size:12px; font-weight:600;
+}
+.kanban-card-stats{
+  display:flex; flex-wrap:wrap; gap:8px; font-size:12px; color:var(--text-muted); margin-top:10px;
+}
+.kanban-card-stats strong{ color:var(--text); font-family:var(--font-mono); }
+.kanban-card-foot{ margin-top:8px; font-size:11.5px; color:var(--text-faint); }
+
+/* assistente de importação inteligente de editais */
+.import-tabs{ display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
+.import-tab{
+  padding:9px 16px; border-radius:999px; border:1px solid var(--border); background:var(--surface);
+  color:var(--text-muted); font-weight:600; font-size:13.5px;
+}
+.import-tab.active{ background:var(--gold-soft); border-color:var(--gold); color:var(--gold); }
+.import-panel{
+  background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+  padding:18px; margin-bottom:12px;
+}
+.import-lines{
+  max-height:360px; overflow-y:auto; border:1px solid var(--border); border-radius:var(--radius-sm);
+  font-family:var(--font-mono); font-size:12.5px;
+}
+.import-line{ padding:5px 10px; border-bottom:1px solid var(--border); cursor:pointer; white-space:pre-wrap; }
+.import-line:hover{ background:var(--gold-soft); color:var(--gold); }
+.import-line:last-child{ border-bottom:none; }
+.preview-topico-row{
+  display:flex; align-items:center; gap:8px; margin-bottom:6px;
+}
+.preview-topico-row .preview-topico-nome{
+  flex:1; background:var(--surface-2); border:1px solid var(--border); color:var(--text);
+  padding:8px 10px; border-radius:var(--radius-sm); font-size:13.5px;
+}
+
 /* empty state */
 .empty-state{
   text-align:center; padding:50px 20px; color:var(--text-muted);

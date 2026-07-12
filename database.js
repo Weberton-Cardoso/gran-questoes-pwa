@@ -6,12 +6,15 @@
  *
  * v2: o cadastro por questão individual ("questoes") foi substituído pelo
  * cadastro por TENTATIVA (bloco de questões de um mesmo assunto).
- * O store antigo "questoes" é migrado automaticamente para "tentativas"
- * na primeira abertura após a atualização, e depois é removido.
+ * v3: os tópicos de um edital passam a ter 4 status (quadro estilo Kanban)
+ * em vez de 3. Editais antigos são migrados automaticamente:
+ *   nao_estudado -> nao_iniciado
+ *   em_estudo    -> em_estudo (mantém)
+ *   concluido    -> dominado
  */
 
 const DB_NAME = 'TrilhaAprovacaoDB';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 const STORES = {
   tentativas: 'tentativas',
@@ -27,6 +30,21 @@ const TIPOS_TENTATIVA = [
   'Simulado'
 ];
 
+const STATUS_TOPICO = ['nao_iniciado', 'em_estudo', 'em_revisao', 'dominado'];
+
+const STATUS_TOPICO_LABEL = {
+  nao_iniciado: 'Não iniciado',
+  em_estudo: 'Em estudo',
+  em_revisao: 'Em revisão',
+  dominado: 'Dominado'
+};
+
+const _STATUS_MIGRACAO_V3 = {
+  nao_estudado: 'nao_iniciado',
+  em_estudo: 'em_estudo',
+  concluido: 'dominado'
+};
+
 let _dbPromise = null;
 
 /** Abre (ou cria/migra) o banco de dados. Reaproveita a mesma promise. */
@@ -39,9 +57,13 @@ function openDB() {
     req.onupgradeneeded = (event) => {
       const db = event.target.result;
       const tx = event.target.transaction;
+      const oldVersion = event.oldVersion || 0;
 
+      let editaisStore;
       if (!db.objectStoreNames.contains(STORES.editais)) {
-        db.createObjectStore(STORES.editais, { keyPath: 'id', autoIncrement: true });
+        editaisStore = db.createObjectStore(STORES.editais, { keyPath: 'id', autoIncrement: true });
+      } else {
+        editaisStore = tx.objectStore(STORES.editais);
       }
 
       if (!db.objectStoreNames.contains(STORES.simulados)) {
@@ -88,6 +110,22 @@ function openDB() {
             // terminou a migração: remove o store antigo
             db.deleteObjectStore('questoes');
           }
+        };
+      }
+
+      // Migração v3: remapeia status antigos (3 estados) para o novo modelo (4 estados)
+      if (oldVersion > 0 && oldVersion < 3) {
+        editaisStore.openCursor().onsuccess = (ev) => {
+          const cursor = ev.target.result;
+          if (!cursor) return;
+          const edital = cursor.value;
+          (edital.materias || []).forEach(m => {
+            (m.topicos || []).forEach(t => {
+              t.status = _STATUS_MIGRACAO_V3[t.status] || 'nao_iniciado';
+            });
+          });
+          cursor.update(edital);
+          cursor.continue();
         };
       }
     };

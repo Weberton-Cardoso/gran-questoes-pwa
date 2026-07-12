@@ -163,6 +163,7 @@ const PAGE_TITLES = {
   'estatisticas/bancas': 'Estatísticas por Banca',
   'estatisticas/concursos': 'Estatísticas por Concurso',
   'editais': 'Editais',
+  'editais/importar': 'Importar Edital',
   'simulados': 'Simulados',
   'configuracoes': 'Configurações'
 };
@@ -205,7 +206,11 @@ async function router() {
       renderAgrupamento(view, sub);
     }
   } else if (base === 'editais') {
-    if (sub) {
+    if (sub === 'importar') {
+      $('#page-title').textContent = 'Importar Edital';
+      updateActiveNav('editais/importar');
+      renderImportarEdital(view);
+    } else if (sub) {
       $('#page-title').textContent = 'Detalhe do Edital';
       updateActiveNav('editais');
       renderEditalDetalhe(view, sub);
@@ -401,6 +406,8 @@ function renderDashboard(view) {
         ${trilha.map(d => `<div class="streak-dot" data-level="${nivelStreakDot(d)}" title="${toBRDate(d.iso)} · ${d.count} questão(ões)"></div>`).join('')}
       </div>
     </div>
+
+    ${buildDashboardEditalHTML()}
   `;
 
   // filtros
@@ -448,6 +455,8 @@ function renderDashboard(view) {
       { label: 'Total', data: diasEvolucao.map(d => d.total) }
     ]
   });
+
+  initDashboardEditalChart();
 }
 
 /* ============================================================
@@ -916,35 +925,25 @@ function renderAssuntoDetalhe(view, nomeAssunto) {
 }
 
 /* ============================================================
-   TELA: EDITAIS
+   TELA: EDITAIS (lista)
+   A importação inteligente, o quadro Kanban de cada edital e o
+   cálculo de progresso (calcProgressoEdital) vivem em editais.js —
+   o cadastro manual de disciplina/tópico foi substituído pela
+   Importação Inteligente de Editais.
    ============================================================ */
-
-function calcProgressoEdital(edital) {
-  let total = 0, concluidos = 0, emEstudo = 0;
-  (edital.materias || []).forEach(m => {
-    (m.topicos || []).forEach(t => {
-      total++;
-      if (t.status === 'concluido') concluidos++;
-      if (t.status === 'em_estudo') emEstudo++;
-    });
-  });
-  const pct = total ? (concluidos / total) * 100 : 0;
-  return { total, concluidos, emEstudo, pendentes: total - concluidos - emEstudo, pct };
-}
 
 function renderEditais(view) {
   view.innerHTML = `
     <div class="toolbar">
-      <div class="text-muted">Organize as matérias e tópicos do seu edital e acompanhe o progresso.</div>
-      <button class="btn btn-primary" id="btn-novo-edital">
+      <div class="text-muted">Importe o edital automaticamente e acompanhe o progresso por disciplina e tópico.</div>
+      <a class="btn btn-primary" href="#/editais/importar">
         <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>
-        Novo edital
-      </button>
+        Importar edital
+      </a>
     </div>
     <div id="lista-editais"></div>
   `;
 
-  $('#btn-novo-edital').addEventListener('click', () => openEditalFormModal());
   renderListaEditais();
 
   function renderListaEditais() {
@@ -952,9 +951,8 @@ function renderEditais(view) {
     if (!state.editais.length) {
       wrap.innerHTML = `<div class="empty-state">
         <p>Nenhum edital cadastrado ainda.</p>
-        <button class="btn btn-primary" id="empty-add-edital">Cadastrar edital</button>
+        <a class="btn btn-primary" href="#/editais/importar">Importar edital</a>
       </div>`;
-      $('#empty-add-edital')?.addEventListener('click', () => openEditalFormModal());
       return;
     }
     wrap.innerHTML = `<div class="grid-3">
@@ -968,7 +966,7 @@ function renderEditais(view) {
             <div class="pct-bar"><span style="width:${prog.pct.toFixed(1)}%"></span></div>
             <span class="num">${fmtPct(prog.pct)}</span>
           </div>
-          <div class="text-muted" style="font-size:13px;">${prog.concluidos}/${prog.total} tópicos concluídos</div>
+          <div class="text-muted" style="font-size:13px;">${prog.dominado}/${prog.total} tópicos dominados</div>
         </div>`;
       }).join('')}
     </div>`;
@@ -976,135 +974,6 @@ function renderEditais(view) {
       card.addEventListener('click', () => { location.hash = `#/editais/${card.dataset.edital}`; });
     });
   }
-}
-
-function openEditalFormModal() {
-  openModal(`
-    <h2>Novo edital</h2>
-    <form id="form-edital">
-      <div class="form-row">
-        <label>Nome do edital</label>
-        <input type="text" name="nome" required placeholder="Ex: Edital PF 2026">
-      </div>
-      <div class="form-row">
-        <label>Concurso</label>
-        <input type="text" name="concurso" placeholder="Ex: Polícia Federal - Agente">
-      </div>
-      <div class="form-row">
-        <label>Matérias e tópicos</label>
-        <textarea name="estrutura" rows="8" placeholder="Português
-  Interpretação de Texto
-  Crase
-  Pontuação
-Direito Constitucional
-  Poder Constituinte
-  Direitos Fundamentais" required></textarea>
-        <span class="text-muted" style="font-size:12.5px;">Uma matéria por linha sem recuo, e os tópicos indentados com espaço/tab na linha de baixo.</span>
-      </div>
-      <div class="modal-actions">
-        <button type="button" class="btn btn-ghost" id="btn-cancelar-edital">Cancelar</button>
-        <button type="submit" class="btn btn-primary btn-block">Criar edital</button>
-      </div>
-    </form>
-  `);
-
-  $('#btn-cancelar-edital').addEventListener('click', closeModal);
-  $('#form-edital').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    const linhas = fd.get('estrutura').split('\n').map(l => l.replace(/\r/, ''));
-    const materias = [];
-    linhas.forEach(linha => {
-      if (!linha.trim()) return;
-      const isTopico = /^[\s\t]/.test(linha);
-      if (isTopico) {
-        if (!materias.length) return;
-        materias[materias.length - 1].topicos.push({ nome: linha.trim(), status: 'nao_estudado' });
-      } else {
-        materias.push({ nome: linha.trim(), topicos: [] });
-      }
-    });
-    await db.editais.add({
-      nome: fd.get('nome').trim(),
-      concurso: fd.get('concurso').trim(),
-      materias
-    });
-    closeModal();
-    await reloadState();
-    showToast('Edital criado.', 'success');
-    router();
-  });
-}
-
-function renderEditalDetalhe(view, idStr) {
-  const id = Number(idStr);
-  const edital = state.editais.find(e => e.id === id);
-  if (!edital) {
-    view.innerHTML = '<div class="empty-state"><p>Edital não encontrado.</p></div>';
-    return;
-  }
-  const prog = calcProgressoEdital(edital);
-  const STATUS_LABEL = { nao_estudado: 'Não estudado', em_estudo: 'Em estudo', concluido: 'Concluído' };
-
-  view.innerHTML = `
-    <div class="flex mb-12" style="justify-content:space-between;">
-      <a href="#/editais" class="btn btn-ghost btn-sm">&larr; Voltar</a>
-      <button class="btn btn-danger btn-sm" id="btn-del-edital">Excluir edital</button>
-    </div>
-
-    <div class="card mb-12">
-      <div class="progress-ring-wrap">
-        <div class="progress-ring-num">${fmtPct(prog.pct)}</div>
-        <div style="flex:1;">
-          <h2 style="margin:0 0 4px;font-family:var(--font-display);">${escapeHtml(edital.nome)}</h2>
-          <div class="text-muted mb-12">${escapeHtml(edital.concurso || '')}</div>
-          <div class="pct-bar-wrap">
-            <div class="pct-bar"><span style="width:${prog.pct.toFixed(1)}%"></span></div>
-          </div>
-          <div class="text-muted mt-12" style="font-size:13px;">
-            ${prog.concluidos} concluídos · ${prog.emEstudo} em estudo · ${prog.pendentes} pendentes
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div id="materias-wrap"></div>
-  `;
-
-  $('#btn-del-edital').addEventListener('click', async () => {
-    if (!confirm('Excluir este edital? Esta ação não pode ser desfeita.')) return;
-    await db.editais.remove(id);
-    await reloadState();
-    showToast('Edital excluído.', 'danger');
-    location.hash = '#/editais';
-  });
-
-  const materiasWrap = $('#materias-wrap');
-  materiasWrap.innerHTML = (edital.materias || []).map((m, mi) => `
-    <div class="edital-materia">
-      <h3>${escapeHtml(m.nome)}</h3>
-      ${(m.topicos || []).map((t, ti) => `
-        <div class="edital-topic">
-          <span>${escapeHtml(t.nome)}</span>
-          <select class="status-select" data-mi="${mi}" data-ti="${ti}">
-            <option value="nao_estudado" ${t.status === 'nao_estudado' ? 'selected' : ''}>Não estudado</option>
-            <option value="em_estudo" ${t.status === 'em_estudo' ? 'selected' : ''}>Em estudo</option>
-            <option value="concluido" ${t.status === 'concluido' ? 'selected' : ''}>Concluído</option>
-          </select>
-        </div>
-      `).join('')}
-    </div>
-  `).join('');
-
-  $$('.status-select', materiasWrap).forEach(sel => {
-    sel.addEventListener('change', async () => {
-      const mi = Number(sel.dataset.mi), ti = Number(sel.dataset.ti);
-      edital.materias[mi].topicos[ti].status = sel.value;
-      await db.editais.update(edital);
-      await reloadState();
-      renderEditalDetalhe(view, idStr);
-    });
-  });
 }
 
 /* ============================================================

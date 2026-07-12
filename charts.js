@@ -55,6 +55,35 @@ function renderPieChart(canvasId, { acertos = 0, erros = 0 }) {
   });
 }
 
+/** Gráfico de rosca genérico com N categorias (ex: status dos tópicos de um edital) */
+function renderStatusDoughnutChart(canvasId, { labels = [], values = [], colors = [] }) {
+  _destroyIfExists(canvasId);
+  const ctx = document.getElementById(canvasId);
+  if (!ctx) return;
+  const c = _themeColors();
+
+  _chartInstances[canvasId] = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels,
+      datasets: [{
+        data: values,
+        backgroundColor: colors,
+        borderWidth: 0,
+        hoverOffset: 6
+      }]
+    },
+    options: {
+      cutout: '68%',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { color: c.text, font: { family: 'Inter' } } }
+      }
+    }
+  });
+}
+
 /** Gráfico de barras - agrupado (ex: certas x erradas por disciplina) */
 function renderBarChart(canvasId, { labels = [], certas = [], erradas = [] }) {
   _destroyIfExists(canvasId);
