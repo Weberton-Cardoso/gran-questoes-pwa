@@ -1,22 +1,35 @@
 /**
  * database.js
  * Camada de acesso a dados usando IndexedDB.
- * Todas as entidades principais (questões, editais, simulados) ficam aqui.
+ * Todas as entidades principais (tentativas, editais, simulados) ficam aqui.
  * Configurações pequenas (tema, sidebar) usam localStorage — ver app.js.
+ *
+ * v2: o cadastro por questão individual ("questoes") foi substituído pelo
+ * cadastro por TENTATIVA (bloco de questões de um mesmo assunto).
+ * O store antigo "questoes" é migrado automaticamente para "tentativas"
+ * na primeira abertura após a atualização, e depois é removido.
  */
 
 const DB_NAME = 'TrilhaAprovacaoDB';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 const STORES = {
-  questoes: 'questoes',
+  tentativas: 'tentativas',
   editais: 'editais',
   simulados: 'simulados'
 };
 
+const TIPOS_TENTATIVA = [
+  'Primeiro estudo',
+  'Revisão',
+  'Refazendo questões',
+  'Refazendo questões erradas',
+  'Simulado'
+];
+
 let _dbPromise = null;
 
-/** Abre (ou cria) o banco de dados. Reaproveita a mesma promise. */
+/** Abre (ou cria/migra) o banco de dados. Reaproveita a mesma promise. */
 function openDB() {
   if (_dbPromise) return _dbPromise;
 
@@ -25,15 +38,7 @@ function openDB() {
 
     req.onupgradeneeded = (event) => {
       const db = event.target.result;
-
-      if (!db.objectStoreNames.contains(STORES.questoes)) {
-        const store = db.createObjectStore(STORES.questoes, { keyPath: 'id', autoIncrement: true });
-        store.createIndex('disciplina', 'disciplina', { unique: false });
-        store.createIndex('assunto', 'assunto', { unique: false });
-        store.createIndex('banca', 'banca', { unique: false });
-        store.createIndex('concurso', 'concurso', { unique: false });
-        store.createIndex('data', 'data', { unique: false });
-      }
+      const tx = event.target.transaction;
 
       if (!db.objectStoreNames.contains(STORES.editais)) {
         db.createObjectStore(STORES.editais, { keyPath: 'id', autoIncrement: true });
@@ -42,6 +47,48 @@ function openDB() {
       if (!db.objectStoreNames.contains(STORES.simulados)) {
         const store = db.createObjectStore(STORES.simulados, { keyPath: 'id', autoIncrement: true });
         store.createIndex('data', 'data', { unique: false });
+      }
+
+      const jaTinhaQuestoes = db.objectStoreNames.contains('questoes');
+      let tentativasStore;
+
+      if (!db.objectStoreNames.contains(STORES.tentativas)) {
+        tentativasStore = db.createObjectStore(STORES.tentativas, { keyPath: 'id', autoIncrement: true });
+        tentativasStore.createIndex('disciplina', 'disciplina', { unique: false });
+        tentativasStore.createIndex('assunto', 'assunto', { unique: false });
+        tentativasStore.createIndex('banca', 'banca', { unique: false });
+        tentativasStore.createIndex('concurso', 'concurso', { unique: false });
+        tentativasStore.createIndex('data', 'data', { unique: false });
+      } else {
+        tentativasStore = tx.objectStore(STORES.tentativas);
+      }
+
+      // Migração: cada questão individual antiga vira uma tentativa de 1 questão.
+      if (jaTinhaQuestoes) {
+        const questoesStore = tx.objectStore('questoes');
+        questoesStore.openCursor().onsuccess = (ev) => {
+          const cursor = ev.target.result;
+          if (cursor) {
+            const q = cursor.value;
+            tentativasStore.add({
+              disciplina: q.disciplina || '',
+              assunto: q.assunto || '',
+              banca: q.banca || '',
+              concurso: q.concurso || '',
+              data: q.data || '',
+              numQuestoes: 1,
+              acertos: q.correta ? 1 : 0,
+              erros: q.correta ? 0 : 1,
+              taxa: q.correta ? 100 : 0,
+              tipo: 'Primeiro estudo',
+              observacoes: q.observacoes || ''
+            });
+            cursor.continue();
+          } else {
+            // terminou a migração: remove o store antigo
+            db.deleteObjectStore('questoes');
+          }
+        };
       }
     };
 
@@ -93,12 +140,12 @@ const db = {
   },
 
   // ---------- Atalhos por entidade ----------
-  questoes: {
-    add: (q) => db.add(STORES.questoes, q),
-    update: (q) => db.update(STORES.questoes, q),
-    remove: (id) => db.remove(STORES.questoes, id),
-    getAll: () => db.getAll(STORES.questoes),
-    clear: () => db.clear(STORES.questoes)
+  tentativas: {
+    add: (t) => db.add(STORES.tentativas, t),
+    update: (t) => db.update(STORES.tentativas, t),
+    remove: (id) => db.remove(STORES.tentativas, id),
+    getAll: () => db.getAll(STORES.tentativas),
+    clear: () => db.clear(STORES.tentativas)
   },
 
   editais: {
@@ -120,33 +167,50 @@ const db = {
 
   // ---------- Backup ----------
   async exportAll() {
-    const [questoes, editais, simulados] = await Promise.all([
-      db.getAll(STORES.questoes),
+    const [tentativas, editais, simulados] = await Promise.all([
+      db.getAll(STORES.tentativas),
       db.getAll(STORES.editais),
       db.getAll(STORES.simulados)
     ]);
     return {
       versao: DB_VERSION,
       exportadoEm: new Date().toISOString(),
-      questoes, editais, simulados
+      tentativas, editais, simulados
     };
   },
 
   async importAll(data, { substituir = true } = {}) {
     if (substituir) {
       await Promise.all([
-        db.clear(STORES.questoes),
+        db.clear(STORES.tentativas),
         db.clear(STORES.editais),
         db.clear(STORES.simulados)
       ]);
     }
-    const listaQuestoes = Array.isArray(data.questoes) ? data.questoes : [];
+
+    // Compatível com backups antigos (v1, baseados em "questoes")
+    const listaTentativas = Array.isArray(data.tentativas)
+      ? data.tentativas
+      : (Array.isArray(data.questoes) ? data.questoes.map(q => ({
+          disciplina: q.disciplina || '',
+          assunto: q.assunto || '',
+          banca: q.banca || '',
+          concurso: q.concurso || '',
+          data: q.data || '',
+          numQuestoes: 1,
+          acertos: q.correta ? 1 : 0,
+          erros: q.correta ? 0 : 1,
+          taxa: q.correta ? 100 : 0,
+          tipo: 'Primeiro estudo',
+          observacoes: q.observacoes || ''
+        })) : []);
+
     const listaEditais = Array.isArray(data.editais) ? data.editais : [];
     const listaSimulados = Array.isArray(data.simulados) ? data.simulados : [];
 
-    for (const q of listaQuestoes) {
-      const { id, ...rest } = q;
-      await db.add(STORES.questoes, rest);
+    for (const t of listaTentativas) {
+      const { id, ...rest } = t;
+      await db.add(STORES.tentativas, rest);
     }
     for (const e of listaEditais) {
       const { id, ...rest } = e;
@@ -160,7 +224,7 @@ const db = {
 
   async zerarTudo() {
     await Promise.all([
-      db.clear(STORES.questoes),
+      db.clear(STORES.tentativas),
       db.clear(STORES.editais),
       db.clear(STORES.simulados)
     ]);

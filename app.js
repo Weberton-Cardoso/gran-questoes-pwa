@@ -2,6 +2,12 @@
  * app.js
  * Roteador (hash-based), renderização das telas, formulários e
  * cálculo de estatísticas do app "Trilha de Aprovação".
+ *
+ * Modelo de dados principal: TENTATIVA — um bloco de questões resolvidas
+ * de um mesmo assunto (disciplina, assunto, banca, concurso, data,
+ * quantidade de questões, acertos, erros, taxa, tipo, observações).
+ * Todas as telas (dashboard, estatísticas, editais, simulados) usam
+ * as tentativas como fonte única de verdade.
  */
 
 /* ============================================================
@@ -40,12 +46,10 @@ function fmtPct(n) {
   return `${n.toFixed(1)}%`;
 }
 
-function fmtTempo(totalSegundos) {
-  const s = Math.round(totalSegundos || 0);
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  if (h > 0) return `${h}h ${pad(m)}m`;
-  return `${m}m`;
+function fmtPctSigned(n) {
+  if (!isFinite(n)) return '0 p.p.';
+  const sinal = n > 0 ? '+' : '';
+  return `${sinal}${n.toFixed(1)} p.p.`;
 }
 
 function escapeHtml(str) {
@@ -84,17 +88,17 @@ function applyTheme() {
    ============================================================ */
 
 const state = {
-  questoes: [],
+  tentativas: [],
   editais: [],
   simulados: [],
   dashboardFiltro: { tipo: '7d', inicio: null, fim: null }
 };
 
 async function reloadState() {
-  const [questoes, editais, simulados] = await Promise.all([
-    db.questoes.getAll(), db.editais.getAll(), db.simulados.getAll()
+  const [tentativas, editais, simulados] = await Promise.all([
+    db.tentativas.getAll(), db.editais.getAll(), db.simulados.getAll()
   ]);
-  state.questoes = questoes;
+  state.tentativas = tentativas;
   state.editais = editais;
   state.simulados = simulados;
 }
@@ -153,7 +157,7 @@ function updateActiveNav(route) {
 
 const PAGE_TITLES = {
   'dashboard': 'Dashboard',
-  'questoes': 'Questões',
+  'tentativas': 'Tentativas',
   'estatisticas/disciplinas': 'Estatísticas por Disciplina',
   'estatisticas/assuntos': 'Estatísticas por Assunto',
   'estatisticas/bancas': 'Estatísticas por Banca',
@@ -164,7 +168,11 @@ const PAGE_TITLES = {
 };
 
 async function router() {
-  const hash = location.hash.replace(/^#\//, '') || 'dashboard';
+  let hash = location.hash.replace(/^#\//, '') || 'dashboard';
+  // compatibilidade com links antigos (versão baseada em questões individuais)
+  if (hash === 'questoes' || hash.startsWith('questoes/')) {
+    hash = hash.replace('questoes', 'tentativas');
+  }
   const [base, sub, sub2] = hash.split('/');
   const routeKey = sub ? `${base}/${sub}` : base;
 
@@ -178,15 +186,19 @@ async function router() {
     $('#page-title').textContent = PAGE_TITLES['dashboard'];
     updateActiveNav('dashboard');
     renderDashboard(view);
-  } else if (base === 'questoes') {
-    $('#page-title').textContent = PAGE_TITLES['questoes'];
-    updateActiveNav('questoes');
-    renderQuestoes(view);
+  } else if (base === 'tentativas') {
+    $('#page-title').textContent = PAGE_TITLES['tentativas'];
+    updateActiveNav('tentativas');
+    renderTentativas(view);
   } else if (base === 'estatisticas') {
     if (sub === 'disciplinas' && sub2) {
       $('#page-title').textContent = `Disciplina: ${decodeURIComponent(sub2)}`;
       updateActiveNav('estatisticas/disciplinas');
       renderDisciplinaDetalhe(view, decodeURIComponent(sub2));
+    } else if (sub === 'assuntos' && sub2) {
+      $('#page-title').textContent = `Assunto: ${decodeURIComponent(sub2)}`;
+      updateActiveNav('estatisticas/assuntos');
+      renderAssuntoDetalhe(view, decodeURIComponent(sub2));
     } else {
       $('#page-title').textContent = PAGE_TITLES[routeKey] || 'Estatísticas';
       updateActiveNav(routeKey);
@@ -218,12 +230,12 @@ async function router() {
 }
 
 /* ============================================================
-   CÁLCULO DE ESTATÍSTICAS (funções puras sobre state.questoes)
+   CÁLCULO DE ESTATÍSTICAS (funções puras sobre state.tentativas)
    ============================================================ */
 
-/** Filtra questões dentro de um intervalo de datas (inclusive), formato ISO 'YYYY-MM-DD' */
-function filtrarQuestoesPorPeriodo(inicio, fim) {
-  return state.questoes.filter(q => q.data >= inicio && q.data <= fim);
+/** Filtra tentativas dentro de um intervalo de datas (inclusive), formato ISO 'YYYY-MM-DD' */
+function filtrarTentativasPorPeriodo(inicio, fim) {
+  return state.tentativas.filter(t => t.data >= inicio && t.data <= fim);
 }
 
 /** Resolve o filtro do dashboard em { inicio, fim } */
@@ -239,23 +251,24 @@ function resolverPeriodo(filtro) {
   }
 }
 
+/** Resumo agregado de uma lista de tentativas (soma questões/acertos/erros) */
 function calcResumo(lista) {
-  const total = lista.length;
-  const certas = lista.filter(q => q.correta).length;
-  const erradas = total - certas;
+  const tentativas = lista.length;
+  const total = lista.reduce((acc, t) => acc + (Number(t.numQuestoes) || 0), 0);
+  const certas = lista.reduce((acc, t) => acc + (Number(t.acertos) || 0), 0);
+  const erradas = lista.reduce((acc, t) => acc + (Number(t.erros) || 0), 0);
   const taxa = total ? (certas / total) * 100 : 0;
-  const tempoTotal = lista.reduce((acc, q) => acc + (Number(q.tempoGasto) || 0), 0);
-  return { total, certas, erradas, taxa, tempoTotal };
+  return { tentativas, total, certas, erradas, taxa };
 }
 
-/** Sequência de dias consecutivos (até hoje) com pelo menos 1 questão respondida */
+/** Sequência de dias consecutivos (até hoje) com pelo menos 1 tentativa registrada */
 function calcSequenciaDias() {
-  const diasComQuestao = new Set(state.questoes.map(q => q.data));
+  const diasComTentativa = new Set(state.tentativas.map(t => t.data));
   let streak = 0;
   let cursor = new Date();
   while (true) {
     const iso = toISODate(cursor);
-    if (diasComQuestao.has(iso)) {
+    if (diasComTentativa.has(iso)) {
       streak++;
       cursor.setDate(cursor.getDate() - 1);
     } else {
@@ -270,9 +283,9 @@ function calcTrilhaDias(n = 30) {
   const dias = [];
   for (let i = n - 1; i >= 0; i--) {
     const iso = daysAgoISO(i);
-    const qs = state.questoes.filter(q => q.data === iso);
-    const certas = qs.filter(q => q.correta).length;
-    dias.push({ iso, count: qs.length, ratio: qs.length ? certas / qs.length : 0 });
+    const ts = state.tentativas.filter(t => t.data === iso);
+    const r = calcResumo(ts);
+    dias.push({ iso, count: r.total, ratio: r.total ? r.certas / r.total : 0 });
   }
   return dias;
 }
@@ -289,21 +302,40 @@ function updateStreakMini() {
   $('#streak-mini-count').textContent = `${streak} dia${streak === 1 ? '' : 's'}`;
 }
 
-/** Agrupa questões por uma chave (disciplina, assunto, banca, concurso) */
+/** Agrupa tentativas por uma chave (disciplina, assunto, banca, concurso) */
 function agruparPor(lista, chave) {
   const mapa = new Map();
-  lista.forEach(q => {
-    const valor = (q[chave] || '(Não informado)').trim() || '(Não informado)';
+  lista.forEach(t => {
+    const valor = (t[chave] || '(Não informado)').trim() || '(Não informado)';
     if (!mapa.has(valor)) mapa.set(valor, []);
-    mapa.get(valor).push(q);
+    mapa.get(valor).push(t);
   });
   const resultado = [];
-  mapa.forEach((qs, nome) => {
-    const r = calcResumo(qs);
+  mapa.forEach((ts, nome) => {
+    const r = calcResumo(ts);
     resultado.push({ nome, ...r });
   });
   resultado.sort((a, b) => b.total - a.total);
   return resultado;
+}
+
+/**
+ * Calcula a tendência de desempenho de um assunto/agrupamento a partir de
+ * uma lista de tentativas JÁ ORDENADA CRONOLOGICAMENTE (mais antiga primeiro).
+ * Compara a taxa da última tentativa com a média das tentativas anteriores.
+ */
+function calcTendencia(tentativasOrdenadas) {
+  if (tentativasOrdenadas.length < 2) {
+    return { label: 'Estável', icone: '➡' };
+  }
+  const ultima = tentativasOrdenadas[tentativasOrdenadas.length - 1];
+  const anteriores = tentativasOrdenadas.slice(0, -1);
+  const mediaAnterior = anteriores.reduce((acc, t) => acc + (t.taxa || 0), 0) / anteriores.length;
+  const diff = (ultima.taxa || 0) - mediaAnterior;
+
+  if (diff >= 3) return { label: 'Melhorando', icone: '📈' };
+  if (diff <= -3) return { label: 'Piorando', icone: '📉' };
+  return { label: 'Estável', icone: '➡' };
 }
 
 /* ============================================================
@@ -313,7 +345,7 @@ function agruparPor(lista, chave) {
 function renderDashboard(view) {
   const filtro = state.dashboardFiltro;
   const { inicio, fim } = resolverPeriodo(filtro);
-  const lista = filtrarQuestoesPorPeriodo(inicio, fim);
+  const lista = filtrarTentativasPorPeriodo(inicio, fim);
   const resumo = calcResumo(lista);
   const streak = calcSequenciaDias();
 
@@ -342,8 +374,8 @@ function renderDashboard(view) {
       <div class="stat-card success"><div class="label">Questões certas</div><div class="value">${resumo.certas}</div></div>
       <div class="stat-card danger"><div class="label">Questões erradas</div><div class="value">${resumo.erradas}</div></div>
       <div class="stat-card gold"><div class="label">Taxa de acerto</div><div class="value">${fmtPct(resumo.taxa)}</div></div>
-      <div class="stat-card info"><div class="label">Tempo estudado</div><div class="value">${fmtTempo(resumo.tempoTotal)}</div></div>
-      <div class="stat-card"><div class="label">Média diária</div><div class="value">${mediaDiaria.toFixed(1)}</div></div>
+      <div class="stat-card info"><div class="label">Tentativas registradas</div><div class="value">${resumo.tentativas}</div></div>
+      <div class="stat-card"><div class="label">Média de questões/dia</div><div class="value">${mediaDiaria.toFixed(1)}</div></div>
       <div class="stat-card gold"><div class="label">Sequência de dias</div><div class="value">${streak} 🔥</div></div>
     </div>
 
@@ -399,14 +431,15 @@ function renderDashboard(view) {
     erradas: porDisciplina.map(d => d.erradas)
   });
 
-  // evolução: agrupa por dia dentro do período (ou últimos 14 dias se período muito curto)
+  // evolução: agrupa por dia dentro do período (ou últimos 60 dias se período muito curto)
   const diasEvolucao = [];
   const nDias = Math.min(60, diasNoPeriodo);
   for (let i = nDias - 1; i >= 0; i--) {
     const iso = daysAgoISO(i);
     if (iso < inicio) continue;
-    const qs = state.questoes.filter(q => q.data === iso);
-    diasEvolucao.push({ iso, certas: qs.filter(q => q.correta).length, total: qs.length });
+    const ts = state.tentativas.filter(t => t.data === iso);
+    const r = calcResumo(ts);
+    diasEvolucao.push({ iso, certas: r.certas, total: r.total });
   }
   renderLineChart('chart-linha', {
     labels: diasEvolucao.map(d => toBRDate(d.iso).slice(0, 5)),
@@ -418,47 +451,47 @@ function renderDashboard(view) {
 }
 
 /* ============================================================
-   TELA: QUESTÕES (lista + CRUD)
+   TELA: TENTATIVAS (lista + CRUD do novo modelo por blocos)
    ============================================================ */
 
-let _questoesBusca = '';
+let _tentativasBusca = '';
 
-function renderQuestoes(view) {
+function renderTentativas(view) {
   view.innerHTML = `
     <div class="toolbar">
-      <input type="text" class="search-input" id="busca-questoes" placeholder="Pesquisar por disciplina, assunto, banca ou concurso..." value="${escapeHtml(_questoesBusca)}">
-      <button class="btn btn-primary" id="btn-nova-questao"><svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg> Nova questão</button>
+      <input type="text" class="search-input" id="busca-tentativas" placeholder="Pesquisar por disciplina, assunto, banca ou concurso..." value="${escapeHtml(_tentativasBusca)}">
+      <button class="btn btn-primary" id="btn-nova-tentativa"><svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg> Registrar tentativa</button>
     </div>
     <div class="card" style="padding:0;">
-      <div class="table-wrap" id="tabela-questoes"></div>
+      <div class="table-wrap" id="tabela-tentativas"></div>
     </div>
   `;
 
-  $('#btn-nova-questao').addEventListener('click', () => openQuestaoModal());
-  const buscaInput = $('#busca-questoes');
+  $('#btn-nova-tentativa').addEventListener('click', () => openTentativaModal());
+  const buscaInput = $('#busca-tentativas');
   buscaInput.addEventListener('input', () => {
-    _questoesBusca = buscaInput.value;
-    renderTabelaQuestoes();
+    _tentativasBusca = buscaInput.value;
+    renderTabelaTentativas();
   });
 
-  renderTabelaQuestoes();
+  renderTabelaTentativas();
 
-  function renderTabelaQuestoes() {
-    const termo = _questoesBusca.trim().toLowerCase();
-    let lista = [...state.questoes].sort((a, b) => (b.data || '').localeCompare(a.data || ''));
+  function renderTabelaTentativas() {
+    const termo = _tentativasBusca.trim().toLowerCase();
+    let lista = [...state.tentativas].sort((a, b) => (b.data || '').localeCompare(a.data || ''));
     if (termo) {
-      lista = lista.filter(q =>
-        [q.disciplina, q.assunto, q.banca, q.concurso].some(v => (v || '').toLowerCase().includes(termo))
+      lista = lista.filter(t =>
+        [t.disciplina, t.assunto, t.banca, t.concurso].some(v => (v || '').toLowerCase().includes(termo))
       );
     }
 
-    const wrap = $('#tabela-questoes');
+    const wrap = $('#tabela-tentativas');
     if (!lista.length) {
       wrap.innerHTML = `<div class="empty-state">
-        <p>Nenhuma questão cadastrada ainda.</p>
-        <button class="btn btn-primary" id="empty-add-questao">Adicionar primeira questão</button>
+        <p>Nenhuma tentativa registrada ainda.</p>
+        <button class="btn btn-primary" id="empty-add-tentativa">Registrar primeira tentativa</button>
       </div>`;
-      $('#empty-add-questao')?.addEventListener('click', () => openQuestaoModal());
+      $('#empty-add-tentativa')?.addEventListener('click', () => openTentativaModal());
       return;
     }
 
@@ -467,25 +500,28 @@ function renderQuestoes(view) {
         <thead>
           <tr>
             <th>Data</th><th>Disciplina</th><th>Assunto</th><th>Banca</th><th>Concurso</th>
-            <th>Resultado</th><th>Tempo</th><th></th>
+            <th>Tipo</th><th>Questões</th><th>Acertos</th><th>Erros</th><th>Taxa</th><th></th>
           </tr>
         </thead>
         <tbody>
-          ${lista.map(q => `
+          ${lista.map(t => `
             <tr>
-              <td class="num">${toBRDate(q.data)}</td>
-              <td>${escapeHtml(q.disciplina) || '-'}</td>
-              <td>${escapeHtml(q.assunto) || '-'}</td>
-              <td>${escapeHtml(q.banca) || '-'}</td>
-              <td>${escapeHtml(q.concurso) || '-'}</td>
-              <td><span class="badge ${q.correta ? 'success' : 'danger'}">${q.correta ? 'Certa' : 'Errada'}</span></td>
-              <td class="num">${q.tempoGasto ? fmtTempo(q.tempoGasto) : '-'}</td>
+              <td class="num">${toBRDate(t.data)}</td>
+              <td>${escapeHtml(t.disciplina) || '-'}</td>
+              <td>${escapeHtml(t.assunto) || '-'}</td>
+              <td>${escapeHtml(t.banca) || '-'}</td>
+              <td>${escapeHtml(t.concurso) || '-'}</td>
+              <td><span class="badge muted">${escapeHtml(t.tipo) || '-'}</span></td>
+              <td class="num">${t.numQuestoes}</td>
+              <td class="num" style="color:var(--success)">${t.acertos}</td>
+              <td class="num" style="color:var(--danger)">${t.erros}</td>
+              <td class="num">${fmtPct(t.taxa)}</td>
               <td>
                 <div class="flex gap-8">
-                  <button class="icon-btn" data-edit="${q.id}" title="Editar">
+                  <button class="icon-btn" data-edit="${t.id}" title="Editar">
                     <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75zM20.71 7.04a1 1 0 000-1.41l-2.34-2.34a1 1 0 00-1.41 0l-1.83 1.83 3.75 3.75z"/></svg>
                   </button>
-                  <button class="icon-btn" data-del="${q.id}" title="Excluir">
+                  <button class="icon-btn" data-del="${t.id}" title="Excluir">
                     <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M6 7h12l-1 14H7zM9 4h6l1 2H8zM9 10v8M12 10v8M15 10v8"/></svg>
                   </button>
                 </div>
@@ -497,110 +533,143 @@ function renderQuestoes(view) {
     `;
 
     $$('[data-edit]', wrap).forEach(btn => btn.addEventListener('click', () => {
-      const q = state.questoes.find(x => x.id === Number(btn.dataset.edit));
-      openQuestaoModal(q);
+      const t = state.tentativas.find(x => x.id === Number(btn.dataset.edit));
+      openTentativaModal(t);
     }));
     $$('[data-del]', wrap).forEach(btn => btn.addEventListener('click', async () => {
-      if (!confirm('Excluir esta questão?')) return;
-      await db.questoes.remove(Number(btn.dataset.del));
+      if (!confirm('Excluir esta tentativa?')) return;
+      await db.tentativas.remove(Number(btn.dataset.del));
       await reloadState();
-      renderTabelaQuestoes();
+      renderTabelaTentativas();
       updateStreakMini();
-      showToast('Questão excluída.', 'danger');
+      showToast('Tentativa excluída.', 'danger');
     }));
   }
 }
 
-/* ---- Modal de cadastro/edição de questão ---- */
+/* ---- Modal de cadastro/edição de tentativa ---- */
 
-function openQuestaoModal(questao = null) {
-  const isEdit = !!questao;
-  const q = questao || { data: todayISO(), correta: true };
+function openTentativaModal(tentativa = null) {
+  const isEdit = !!tentativa;
+  const t = tentativa || { data: todayISO(), numQuestoes: '', acertos: '', tipo: TIPOS_TENTATIVA[0] };
 
   openModal(`
-    <h2>${isEdit ? 'Editar questão' : 'Nova questão'}</h2>
-    <form id="form-questao">
+    <h2>${isEdit ? 'Editar tentativa' : 'Registrar tentativa'}</h2>
+    <form id="form-tentativa">
       <div class="form-grid-2">
         <div class="form-row">
           <label>Disciplina</label>
-          <input type="text" name="disciplina" required value="${escapeHtml(q.disciplina)}" placeholder="Ex: Direito Constitucional">
+          <input type="text" name="disciplina" required value="${escapeHtml(t.disciplina)}" placeholder="Ex: Direito Constitucional">
         </div>
         <div class="form-row">
           <label>Assunto</label>
-          <input type="text" name="assunto" value="${escapeHtml(q.assunto)}" placeholder="Ex: Controle de Constitucionalidade">
+          <input type="text" name="assunto" required value="${escapeHtml(t.assunto)}" placeholder="Ex: Poder Constituinte">
         </div>
       </div>
       <div class="form-grid-2">
         <div class="form-row">
-          <label>Banca</label>
-          <input type="text" name="banca" value="${escapeHtml(q.banca)}" placeholder="Ex: CESPE/CEBRASPE">
+          <label>Banca (opcional)</label>
+          <input type="text" name="banca" value="${escapeHtml(t.banca)}" placeholder="Ex: CESPE/CEBRASPE">
         </div>
         <div class="form-row">
-          <label>Concurso</label>
-          <input type="text" name="concurso" value="${escapeHtml(q.concurso)}" placeholder="Ex: PF - Agente">
+          <label>Concurso (opcional)</label>
+          <input type="text" name="concurso" value="${escapeHtml(t.concurso)}" placeholder="Ex: PF - Agente">
         </div>
       </div>
       <div class="form-grid-2">
         <div class="form-row">
           <label>Data</label>
-          <input type="date" name="data" required value="${q.data}">
+          <input type="date" name="data" required value="${t.data}">
         </div>
         <div class="form-row">
-          <label>Tempo gasto (segundos, opcional)</label>
-          <input type="number" name="tempoGasto" min="0" value="${q.tempoGasto || ''}" placeholder="Ex: 90">
+          <label>Tipo da tentativa</label>
+          <select name="tipo">
+            ${TIPOS_TENTATIVA.map(tp => `<option value="${tp}" ${t.tipo === tp ? 'selected' : ''}>${tp}</option>`).join('')}
+          </select>
         </div>
       </div>
-      <div class="form-row">
-        <label>Resultado</label>
-        <div class="toggle-group">
-          <button type="button" class="tg-correta ${q.correta ? 'on correta' : ''}" data-val="true">Certa</button>
-          <button type="button" class="tg-correta ${!q.correta ? 'on errada' : ''}" data-val="false">Errada</button>
+      <div class="form-grid-2">
+        <div class="form-row">
+          <label>Quantidade de questões</label>
+          <input type="number" name="numQuestoes" id="input-num-questoes" required min="1" value="${t.numQuestoes ?? ''}" placeholder="Ex: 19">
+        </div>
+        <div class="form-row">
+          <label>Quantidade de acertos</label>
+          <input type="number" name="acertos" id="input-acertos" required min="0" value="${t.acertos ?? ''}" placeholder="Ex: 14">
+        </div>
+      </div>
+      <div class="form-grid-2">
+        <div class="form-row">
+          <label>Quantidade de erros</label>
+          <input type="text" id="display-erros" disabled value="${isEdit ? (t.numQuestoes - t.acertos) : ''}">
+        </div>
+        <div class="form-row">
+          <label>Taxa de acertos</label>
+          <input type="text" id="display-taxa" disabled value="${isEdit ? fmtPct(t.taxa) : ''}">
         </div>
       </div>
       <div class="form-row">
         <label>Observações (opcional)</label>
-        <textarea name="observacoes" placeholder="Anotações sobre a questão...">${escapeHtml(q.observacoes)}</textarea>
+        <textarea name="observacoes" placeholder="Anotações sobre essa tentativa...">${escapeHtml(t.observacoes)}</textarea>
       </div>
-      <input type="hidden" name="correta" value="${q.correta ? 'true' : 'false'}">
       <div class="modal-actions">
-        <button type="button" class="btn btn-ghost" id="btn-cancelar-questao">Cancelar</button>
-        <button type="submit" class="btn btn-primary btn-block">${isEdit ? 'Salvar alterações' : 'Adicionar questão'}</button>
+        <button type="button" class="btn btn-ghost" id="btn-cancelar-tentativa">Cancelar</button>
+        <button type="submit" class="btn btn-primary btn-block">${isEdit ? 'Salvar alterações' : 'Salvar tentativa'}</button>
       </div>
     </form>
   `);
 
-  const form = $('#form-questao');
-  const hiddenCorreta = form.querySelector('input[name="correta"]');
-  $$('.tg-correta', form).forEach(btn => {
-    btn.addEventListener('click', () => {
-      $$('.tg-correta', form).forEach(b => b.classList.remove('on', 'correta', 'errada'));
-      const isCerta = btn.dataset.val === 'true';
-      btn.classList.add('on', isCerta ? 'correta' : 'errada');
-      hiddenCorreta.value = btn.dataset.val;
-    });
-  });
+  const form = $('#form-tentativa');
+  const numQuestoesInput = $('#input-num-questoes', form);
+  const acertosInput = $('#input-acertos', form);
+  const displayErros = $('#display-erros', form);
+  const displayTaxa = $('#display-taxa', form);
 
-  $('#btn-cancelar-questao').addEventListener('click', closeModal);
+  function atualizarCalculados() {
+    const num = Number(numQuestoesInput.value) || 0;
+    let acertos = Number(acertosInput.value) || 0;
+    if (acertos > num) {
+      acertos = num;
+      acertosInput.value = num;
+    }
+    const erros = Math.max(0, num - acertos);
+    const taxa = num ? (acertos / num) * 100 : 0;
+    displayErros.value = num ? erros : '';
+    displayTaxa.value = num ? fmtPct(taxa) : '';
+  }
+  numQuestoesInput.addEventListener('input', atualizarCalculados);
+  acertosInput.addEventListener('input', atualizarCalculados);
+
+  $('#btn-cancelar-tentativa').addEventListener('click', closeModal);
 
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(form);
+    const numQuestoes = Number(fd.get('numQuestoes'));
+    let acertos = Number(fd.get('acertos'));
+    if (acertos > numQuestoes) acertos = numQuestoes;
+    const erros = numQuestoes - acertos;
+    const taxa = numQuestoes ? (acertos / numQuestoes) * 100 : 0;
+
     const obj = {
       disciplina: fd.get('disciplina').trim(),
       assunto: fd.get('assunto').trim(),
       banca: fd.get('banca').trim(),
       concurso: fd.get('concurso').trim(),
       data: fd.get('data'),
-      tempoGasto: fd.get('tempoGasto') ? Number(fd.get('tempoGasto')) : 0,
-      correta: fd.get('correta') === 'true',
+      numQuestoes,
+      acertos,
+      erros,
+      taxa,
+      tipo: fd.get('tipo'),
       observacoes: fd.get('observacoes').trim()
     };
     if (isEdit) {
-      await db.questoes.update({ id: q.id, ...obj });
-      showToast('Questão atualizada.', 'success');
+      await db.tentativas.update({ id: t.id, ...obj });
+      showToast('Tentativa atualizada.', 'success');
     } else {
-      await db.questoes.add(obj);
-      showToast('Questão adicionada.', 'success');
+      await db.tentativas.add(obj);
+      showToast('Tentativa registrada.', 'success');
     }
     closeModal();
     await reloadState();
@@ -613,18 +682,18 @@ function openQuestaoModal(questao = null) {
    ============================================================ */
 
 const AGRUPAMENTO_CONFIG = {
-  disciplinas: { chave: 'disciplina', titulo: 'Disciplina', clicavel: true },
-  assuntos: { chave: 'assunto', titulo: 'Assunto', clicavel: false },
+  disciplinas: { chave: 'disciplina', titulo: 'Disciplina', clicavel: true, rota: 'disciplinas' },
+  assuntos: { chave: 'assunto', titulo: 'Assunto', clicavel: true, rota: 'assuntos' },
   bancas: { chave: 'banca', titulo: 'Banca', clicavel: false },
   concursos: { chave: 'concurso', titulo: 'Concurso', clicavel: false }
 };
 
 function renderAgrupamento(view, tipo) {
   const cfg = AGRUPAMENTO_CONFIG[tipo] || AGRUPAMENTO_CONFIG.disciplinas;
-  const dados = agruparPor(state.questoes, cfg.chave);
+  const dados = agruparPor(state.tentativas, cfg.chave);
 
   if (!dados.length) {
-    view.innerHTML = `<div class="empty-state"><p>Nenhuma questão cadastrada para gerar estatísticas por ${cfg.titulo.toLowerCase()}.</p></div>`;
+    view.innerHTML = `<div class="empty-state"><p>Nenhuma tentativa registrada para gerar estatísticas por ${cfg.titulo.toLowerCase()}.</p></div>`;
     return;
   }
 
@@ -637,7 +706,7 @@ function renderAgrupamento(view, tipo) {
           <thead>
             <tr>
               ${isRanking ? '<th>#</th>' : ''}
-              <th>${cfg.titulo}</th><th>Certas</th><th>Erradas</th><th>Total</th><th>% de acerto</th>
+              <th>${cfg.titulo}</th><th>Tentativas</th><th>Certas</th><th>Erradas</th><th>Total</th><th>% de acerto</th>
             </tr>
           </thead>
           <tbody>
@@ -645,7 +714,8 @@ function renderAgrupamento(view, tipo) {
               <tr class="${cfg.clicavel ? 'clickable' : ''}" ${cfg.clicavel ? `data-nome="${escapeHtml(d.nome)}"` : ''}>
                 ${isRanking ? `<td class="num">${i + 1}º</td>` : ''}
                 <td>${escapeHtml(d.nome)}</td>
-                <td class="num badge success" style="background:none;color:var(--success)">${d.certas}</td>
+                <td class="num">${d.tentativas}</td>
+                <td class="num" style="color:var(--success)">${d.certas}</td>
                 <td class="num" style="color:var(--danger)">${d.erradas}</td>
                 <td class="num">${d.total}</td>
                 <td>
@@ -665,7 +735,7 @@ function renderAgrupamento(view, tipo) {
   if (cfg.clicavel) {
     $$('tr[data-nome]').forEach(tr => {
       tr.addEventListener('click', () => {
-        location.hash = `#/estatisticas/disciplinas/${encodeURIComponent(tr.dataset.nome)}`;
+        location.hash = `#/estatisticas/${cfg.rota}/${encodeURIComponent(tr.dataset.nome)}`;
       });
     });
   }
@@ -674,22 +744,24 @@ function renderAgrupamento(view, tipo) {
 /* ---- Detalhe de uma disciplina específica ---- */
 
 function renderDisciplinaDetalhe(view, nomeDisciplina) {
-  const lista = state.questoes.filter(q => (q.disciplina || '(Não informado)') === nomeDisciplina);
+  const lista = state.tentativas.filter(t => (t.disciplina || '(Não informado)') === nomeDisciplina);
   const resumo = calcResumo(lista);
   const porAssunto = agruparPor(lista, 'assunto');
 
-  // evolução: últimos 30 dias, apenas questões desta disciplina
+  // evolução: últimos 30 dias, apenas tentativas desta disciplina
   const dias = [];
   for (let i = 29; i >= 0; i--) {
     const iso = daysAgoISO(i);
-    const qs = lista.filter(q => q.data === iso);
-    dias.push({ iso, certas: qs.filter(q => q.correta).length, total: qs.length });
+    const ts = lista.filter(t => t.data === iso);
+    const r = calcResumo(ts);
+    dias.push({ iso, certas: r.certas, total: r.total });
   }
 
   view.innerHTML = `
     <div class="flex mb-12"><a href="#/estatisticas/disciplinas" class="btn btn-ghost btn-sm">&larr; Voltar</a></div>
     <div class="stat-grid">
-      <div class="stat-card"><div class="label">Total</div><div class="value">${resumo.total}</div></div>
+      <div class="stat-card"><div class="label">Tentativas</div><div class="value">${resumo.tentativas}</div></div>
+      <div class="stat-card"><div class="label">Total de questões</div><div class="value">${resumo.total}</div></div>
       <div class="stat-card success"><div class="label">Certas</div><div class="value">${resumo.certas}</div></div>
       <div class="stat-card danger"><div class="label">Erradas</div><div class="value">${resumo.erradas}</div></div>
       <div class="stat-card gold"><div class="label">% de acerto</div><div class="value">${fmtPct(resumo.taxa)}</div></div>
@@ -704,11 +776,12 @@ function renderDisciplinaDetalhe(view, nomeDisciplina) {
     <div class="card" style="padding:0;">
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Assunto</th><th>Certas</th><th>Erradas</th><th>Total</th><th>% de acerto</th></tr></thead>
+          <thead><tr><th>Assunto</th><th>Tentativas</th><th>Certas</th><th>Erradas</th><th>Total</th><th>% de acerto</th></tr></thead>
           <tbody>
             ${porAssunto.map(a => `
-              <tr>
+              <tr class="clickable" data-assunto="${escapeHtml(a.nome)}">
                 <td>${escapeHtml(a.nome)}</td>
+                <td class="num">${a.tentativas}</td>
                 <td class="num" style="color:var(--success)">${a.certas}</td>
                 <td class="num" style="color:var(--danger)">${a.erradas}</td>
                 <td class="num">${a.total}</td>
@@ -725,18 +798,22 @@ function renderDisciplinaDetalhe(view, nomeDisciplina) {
       </div>
     </div>
 
-    <div class="section-title">Histórico de questões</div>
+    <div class="section-title">Histórico de tentativas</div>
     <div class="card" style="padding:0;">
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Data</th><th>Assunto</th><th>Banca</th><th>Resultado</th></tr></thead>
+          <thead><tr><th>Data</th><th>Assunto</th><th>Banca</th><th>Tipo</th><th>Questões</th><th>Acertos</th><th>Erros</th><th>Taxa</th></tr></thead>
           <tbody>
-            ${[...lista].sort((a, b) => b.data.localeCompare(a.data)).map(q => `
+            ${[...lista].sort((a, b) => b.data.localeCompare(a.data)).map(t => `
               <tr>
-                <td class="num">${toBRDate(q.data)}</td>
-                <td>${escapeHtml(q.assunto) || '-'}</td>
-                <td>${escapeHtml(q.banca) || '-'}</td>
-                <td><span class="badge ${q.correta ? 'success' : 'danger'}">${q.correta ? 'Certa' : 'Errada'}</span></td>
+                <td class="num">${toBRDate(t.data)}</td>
+                <td>${escapeHtml(t.assunto) || '-'}</td>
+                <td>${escapeHtml(t.banca) || '-'}</td>
+                <td><span class="badge muted">${escapeHtml(t.tipo) || '-'}</span></td>
+                <td class="num">${t.numQuestoes}</td>
+                <td class="num" style="color:var(--success)">${t.acertos}</td>
+                <td class="num" style="color:var(--danger)">${t.erros}</td>
+                <td class="num">${fmtPct(t.taxa)}</td>
               </tr>
             `).join('')}
           </tbody>
@@ -745,11 +822,95 @@ function renderDisciplinaDetalhe(view, nomeDisciplina) {
     </div>
   `;
 
+  $$('tr[data-assunto]').forEach(tr => {
+    tr.addEventListener('click', () => {
+      location.hash = `#/estatisticas/assuntos/${encodeURIComponent(tr.dataset.assunto)}`;
+    });
+  });
+
   renderLineChart('chart-disciplina-evolucao', {
     labels: dias.map(d => toBRDate(d.iso).slice(0, 5)),
     series: [
       { label: 'Certas', data: dias.map(d => d.certas) },
       { label: 'Total', data: dias.map(d => d.total) }
+    ]
+  });
+}
+
+/* ---- Detalhe de um assunto específico: evolução por tentativa ---- */
+
+function renderAssuntoDetalhe(view, nomeAssunto) {
+  const lista = state.tentativas.filter(t => (t.assunto || '(Não informado)') === nomeAssunto);
+
+  if (!lista.length) {
+    view.innerHTML = `
+      <div class="flex mb-12"><a href="#/estatisticas/assuntos" class="btn btn-ghost btn-sm">&larr; Voltar</a></div>
+      <div class="empty-state"><p>Nenhuma tentativa registrada para este assunto.</p></div>
+    `;
+    return;
+  }
+
+  const ordenada = [...lista].sort((a, b) => (a.data || '').localeCompare(b.data || '') || (a.id - b.id));
+  const resumo = calcResumo(lista);
+  const melhor = ordenada.reduce((m, t) => (t.taxa > m.taxa ? t : m), ordenada[0]);
+  const pior = ordenada.reduce((m, t) => (t.taxa < m.taxa ? t : m), ordenada[0]);
+  const ultima = ordenada[ordenada.length - 1];
+  const primeira = ordenada[0];
+  const tendencia = calcTendencia(ordenada);
+  const evolucaoPP = ultima.taxa - primeira.taxa;
+
+  view.innerHTML = `
+    <div class="flex mb-12"><a href="#/estatisticas/assuntos" class="btn btn-ghost btn-sm">&larr; Voltar</a></div>
+
+    <div class="stat-grid">
+      <div class="stat-card"><div class="label">Total de tentativas</div><div class="value">${resumo.tentativas}</div></div>
+      <div class="stat-card"><div class="label">Total de questões</div><div class="value">${resumo.total}</div></div>
+      <div class="stat-card success"><div class="label">Total de acertos</div><div class="value">${resumo.certas}</div></div>
+      <div class="stat-card danger"><div class="label">Total de erros</div><div class="value">${resumo.erradas}</div></div>
+      <div class="stat-card gold"><div class="label">Taxa média</div><div class="value">${fmtPct(resumo.taxa)}</div></div>
+      <div class="stat-card success"><div class="label">Melhor resultado</div><div class="value">${fmtPct(melhor.taxa)}</div></div>
+      <div class="stat-card danger"><div class="label">Pior resultado</div><div class="value">${fmtPct(pior.taxa)}</div></div>
+      <div class="stat-card info"><div class="label">Última tentativa</div><div class="value">${toBRDate(ultima.data)}</div></div>
+      <div class="stat-card"><div class="label">Tendência</div><div class="value">${tendencia.icone} ${tendencia.label}</div></div>
+    </div>
+
+    <div class="card mb-12">
+      <div class="card-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+        <span>Evolução da taxa de acertos</span>
+        <span class="text-muted" style="font-weight:500;font-size:13px;text-transform:none;letter-spacing:normal;">
+          ${evolucaoPP >= 0 ? '📈' : '📉'} ${fmtPctSigned(evolucaoPP)} desde a primeira tentativa
+        </span>
+      </div>
+      <div class="chart-wrap"><canvas id="chart-assunto-evolucao"></canvas></div>
+    </div>
+
+    <div class="section-title">Histórico completo</div>
+    <div class="timeline">
+      ${[...ordenada].reverse().map(t => `
+        <div class="timeline-item">
+          <div class="timeline-dot"></div>
+          <div class="timeline-card">
+            <div class="timeline-card-head">
+              <span class="timeline-date">${toBRDate(t.data)}</span>
+              <span class="badge muted">${escapeHtml(t.tipo) || '-'}</span>
+            </div>
+            <div class="timeline-stats">
+              <span><strong>${t.numQuestoes}</strong> questões</span>
+              <span style="color:var(--success)"><strong>${t.acertos}</strong> acertos</span>
+              <span style="color:var(--danger)"><strong>${t.erros}</strong> erros</span>
+              <span class="timeline-taxa">${fmtPct(t.taxa)}</span>
+            </div>
+            ${t.observacoes ? `<div class="timeline-obs">${escapeHtml(t.observacoes)}</div>` : ''}
+          </div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+
+  renderLineChart('chart-assunto-evolucao', {
+    labels: ordenada.map(t => toBRDate(t.data).slice(0, 5)),
+    series: [
+      { label: '% de acerto', data: ordenada.map(t => Number(t.taxa.toFixed(1))) }
     ]
   });
 }
@@ -1028,6 +1189,14 @@ function renderSimulados(view) {
   }));
 }
 
+function fmtTempo(totalSegundos) {
+  const s = Math.round(totalSegundos || 0);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  if (h > 0) return `${h}h ${pad(m)}m`;
+  return `${m}m`;
+}
+
 function openSimuladoModal() {
   openModal(`
     <h2>Novo simulado</h2>
@@ -1094,7 +1263,7 @@ function renderConfiguracoes(view) {
 
       <div class="card">
         <div class="card-title">Backup</div>
-        <p class="text-muted" style="font-size:13.5px;margin-top:0;">Exporte todos os seus dados (questões, editais e simulados) em um arquivo JSON, ou restaure a partir de um backup anterior.</p>
+        <p class="text-muted" style="font-size:13.5px;margin-top:0;">Exporte todos os seus dados (tentativas, editais e simulados) em um arquivo JSON, ou restaure a partir de um backup anterior.</p>
         <div class="flex gap-8" style="flex-wrap:wrap;">
           <button class="btn btn-primary" id="btn-exportar">Exportar backup (.json)</button>
           <button class="btn" id="btn-importar">Importar backup</button>
@@ -1105,7 +1274,7 @@ function renderConfiguracoes(view) {
 
     <div class="card mt-12">
       <div class="card-title">Zona de risco</div>
-      <p class="text-muted" style="font-size:13.5px;margin-top:0;">Isto apaga permanentemente questões, editais e simulados deste dispositivo.</p>
+      <p class="text-muted" style="font-size:13.5px;margin-top:0;">Isto apaga permanentemente tentativas, editais e simulados deste dispositivo.</p>
       <button class="btn btn-danger" id="btn-zerar">Zerar todas as estatísticas</button>
     </div>
   `;
@@ -1184,7 +1353,7 @@ window.addEventListener('DOMContentLoaded', () => {
   initSidebar();
   initGlobalModalHandlers();
 
-  $('#add-questao-btn').addEventListener('click', () => openQuestaoModal());
+  $('#add-questao-btn').addEventListener('click', () => openTentativaModal());
 
   window.addEventListener('hashchange', router);
   router();
