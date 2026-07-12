@@ -4,7 +4,7 @@
  * (dados ficam no IndexedDB, não no cache).
  */
 
-const CACHE_NAME = 'trilha-aprovacao-v2';
+const CACHE_NAME = 'trilha-aprovacao-v4';
 
 const ASSETS_TO_CACHE = [
   './',
@@ -13,16 +13,28 @@ const ASSETS_TO_CACHE = [
   './app.js',
   './database.js',
   './charts.js',
+  './editais.js',
   './manifest.json',
   './assets/icon-192.png',
   './assets/icon-512.png'
 ];
 
-// Instala o SW e guarda os arquivos essenciais em cache
+// Instala o SW e guarda os arquivos essenciais em cache.
+// Cada arquivo é adicionado individualmente (em vez de cache.addAll, que é
+// tudo-ou-nada): se um arquivo faltar ou der 404, os demais continuam sendo
+// cacheados normalmente e a instalação do Service Worker não falha por causa dele.
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME)
-      .then((cache) => cache.addAll(ASSETS_TO_CACHE))
+      .then((cache) =>
+        Promise.all(
+          ASSETS_TO_CACHE.map((url) =>
+            cache.add(url).catch((err) => {
+              console.warn('[service-worker] não foi possível cachear', url, err);
+            })
+          )
+        )
+      )
       .then(() => self.skipWaiting())
   );
 });
