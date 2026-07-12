@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Trilha de Aprovação — Controle de Questões</title>
+<meta name="description" content="Controle de desempenho em questões de concursos públicos, 100% offline.">
+<meta name="theme-color" content="#0B0F14">
+
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="assets/icon-192.png">
+<link rel="apple-touch-icon" href="assets/icon-192.png">
+
+<!-- Tipografia -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700;800&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Overlay do menu no mobile -->
+<div id="sidebar-overlay" class="sidebar-overlay"></div>
+
+<div class="app-shell">
+
+  <!-- ===================== SIDEBAR ===================== -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-head">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-text">
+          <strong>Trilha</strong>
+          <small>de Aprovação</small>
+        </span>
+      </div>
+      <button id="sidebar-toggle" class="icon-btn" aria-label="Recolher menu" title="Recolher menu">
+        <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M4 6h16v2H4zM4 11h16v2H4zM4 16h16v2H4z"/></svg>
+      </button>
+    </div>
+
+    <nav class="nav" id="nav">
+      <a href="#/dashboard" class="nav-item" data-route="dashboard">
+        <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M3 13h8V3H3zm0 8h8v-6H3zm10 0h8V11h-8zm0-18v6h8V3z"/></svg>
+        <span>Dashboard</span>
+      </a>
+      <a href="#/questoes" class="nav-item" data-route="questoes">
+        <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 2a10 10 0 100 20 10 10 0 000-20zm1 15h-2v-2h2zm2.07-7.75l-.9.92C13.45 11 13 11.5 13 13h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26A1.98 1.98 0 0014 7a2 2 0 00-2-2 2 2 0 00-2 2H8a4 4 0 014-4 4 4 0 014 4c0 .88-.36 1.68-.93 2.25z"/></svg>
+        <span>Questões</span>
+      </a>
+
+      <div class="nav-group">
+        <button class="nav-item nav-group-toggle" data-group="estatisticas">
+          <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M5 9.2h3V19H5zM10.6 5h2.8v14h-2.8zm5.6 8H19v6h-2.8z"/></svg>
+          <span>Estatísticas</span>
+          <svg class="chev" viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M7 10l5 5 5-5z"/></svg>
+        </button>
+        <div class="nav-submenu" data-submenu="estatisticas">
+          <a href="#/estatisticas/disciplinas" data-route="estatisticas/disciplinas">Disciplinas</a>
+          <a href="#/estatisticas/assuntos" data-route="estatisticas/assuntos">Assuntos</a>
+          <a href="#/estatisticas/bancas" data-route="estatisticas/bancas">Bancas</a>
+          <a href="#/estatisticas/concursos" data-route="estatisticas/concursos">Concursos</a>
+        </div>
+      </div>
+
+      <a href="#/editais" class="nav-item" data-route="editais">
+        <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M6 2h9l5 5v13a2 2 0 01-2 2H6a2 2 0 01-2-2V4a2 2 0 012-2zm8 1.5V8h4.5z"/></svg>
+        <span>Editais</span>
+      </a>
+      <a href="#/simulados" class="nav-item" data-route="simulados">
+        <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 2l7 4v6c0 5-3.4 8.6-7 10-3.6-1.4-7-5-7-10V6z"/></svg>
+        <span>Simulados</span>
+      </a>
+      <a href="#/configuracoes" class="nav-item" data-route="configuracoes">
+        <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M19.14 12.94a7.14 7.14 0 000-1.88l2.03-1.58a.5.5 0 00.12-.64l-1.92-3.32a.5.5 0 00-.6-.22l-2.39.96a7.3 7.3 0 00-1.63-.94l-.36-2.54a.5.5 0 00-.5-.42h-3.84a.5.5 0 00-.5.42l-.36 2.54c-.59.24-1.14.56-1.63.94l-2.39-.96a.5.5 0 00-.6.22L2.7 8.84a.5.5 0 00.12.64l2.03 1.58a7.14 7.14 0 000 1.88L2.82 14.5a.5.5 0 00-.12.64l1.92 3.32c.14.24.42.32.6.22l2.39-.96c.49.38 1.04.7 1.63.94l.36 2.54c.05.24.26.42.5.42h3.84c.24 0 .45-.18.5-.42l.36-2.54c.59-.24 1.14-.56 1.63-.94l2.39.96c.24.1.5 0 .6-.22l1.92-3.32a.5.5 0 00-.12-.64zM12 15.5a3.5 3.5 0 110-7 3.5 3.5 0 010 7z"/></svg>
+        <span>Configurações</span>
+      </a>
+    </nav>
+
+    <div class="sidebar-foot">
+      <div class="streak-mini" id="streak-mini" title="Sequência de dias estudando">
+        <svg viewBox="0 0 24 24" width="18" height="18"><path fill="#E8B14D" d="M12 2c1 3-2 4-2 7a4 4 0 108 0c0-1-1-1.5-1-1.5.5 2-1 3-2 3a2.5 2.5 0 01-1-4.8C15 4 12 2 12 2zM8 14a4 4 0 108 0c0 3-2 3-2 5a2 2 0 01-4 0c0-2 1-3-2-5z"/></svg>
+        <span id="streak-mini-count">0 dias</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ===================== CONTEÚDO ===================== -->
+  <div class="main">
+    <header class="topbar">
+      <button id="mobile-menu-btn" class="icon-btn only-mobile" aria-label="Abrir menu">
+        <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M4 6h16v2H4zM4 11h16v2H4zM4 16h16v2H4z"/></svg>
+      </button>
+      <h1 id="page-title">Dashboard</h1>
+      <button id="add-questao-btn" class="btn btn-primary btn-sm">
+        <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>
+        Nova questão
+      </button>
+    </header>
+
+    <main id="view" class="view"></main>
+  </div>
+</div>
+
+<!-- ===================== MODAIS ===================== -->
+<div id="modal-root" class="modal-root"></div>
+
+<!-- ===================== TOASTS ===================== -->
+<div id="toast-root" class="toast-root"></div>
+
+<!-- Chart.js via CDN -->
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+
+<script src="database.js"></script>
+<script src="charts.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
