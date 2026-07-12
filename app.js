@@ -158,6 +158,7 @@ function updateActiveNav(route) {
 const PAGE_TITLES = {
   'dashboard': 'Dashboard',
   'tentativas': 'Tentativas',
+  'importar-historico': 'Importar Histórico',
   'estatisticas/disciplinas': 'Estatísticas por Disciplina',
   'estatisticas/assuntos': 'Estatísticas por Assunto',
   'estatisticas/bancas': 'Estatísticas por Banca',
@@ -191,6 +192,10 @@ async function router() {
     $('#page-title').textContent = PAGE_TITLES['tentativas'];
     updateActiveNav('tentativas');
     renderTentativas(view);
+  } else if (base === 'importar-historico') {
+    $('#page-title').textContent = PAGE_TITLES['importar-historico'];
+    updateActiveNav('importar-historico');
+    renderImportarHistorico(view);
   } else if (base === 'estatisticas') {
     if (sub === 'disciplinas' && sub2) {
       $('#page-title').textContent = `Disciplina: ${decodeURIComponent(sub2)}`;
