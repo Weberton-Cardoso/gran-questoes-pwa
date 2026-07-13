@@ -145,7 +145,14 @@ async function tx(storeName, mode, fn) {
     const store = transaction.objectStore(storeName);
     const request = fn(store);
 
-    transaction.oncomplete = () => resolve(request ? request.result : undefined);
+    transaction.oncomplete = () => {
+      // Avisa quem estiver interessado (ex.: cloud-sync.js) que algo mudou,
+      // apenas para transações de escrita.
+      if (mode === 'readwrite') {
+        window.dispatchEvent(new CustomEvent('ta:mudou', { detail: { storeName } }));
+      }
+      resolve(request ? request.result : undefined);
+    };
     transaction.onerror = () => reject(transaction.error);
   });
 }

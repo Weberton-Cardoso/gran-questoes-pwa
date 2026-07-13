@@ -147,7 +147,8 @@ button{ font-family:inherit; cursor:pointer; }
 .nav-submenu a:hover{ color:var(--text); background:var(--surface-hover); }
 .nav-submenu a.active{ color:var(--gold); }
 
-.sidebar-foot{ padding:16px; border-top:1px solid var(--border); }
+.sidebar-foot{ padding:16px; border-top:1px solid var(--border); display:flex; flex-direction:column; gap:10px; }
+.conta-btn{ width:100%; justify-content:center; display:flex; align-items:center; gap:6px; }
 .streak-mini{
   display:flex; align-items:center; gap:8px; font-size:13px; font-weight:600;
   background:var(--surface-2); border-radius:var(--radius-sm); padding:10px 12px;
