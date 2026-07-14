@@ -848,13 +848,13 @@ function openTentativaModal(tentativa = null) {
         </div>
         <div class="form-row">
           <label>Quantidade de acertos</label>
-          <input type="number" name="acertos" id="input-acertos" required min="0" value="${t.acertos ?? ''}" placeholder="Ex: 14">
+          <input type="number" name="acertos" id="input-acertos" min="0" value="${t.acertos ?? ''}" placeholder="Ex: 14">
         </div>
       </div>
       <div class="form-grid-2">
         <div class="form-row">
           <label>Quantidade de erros</label>
-          <input type="text" id="display-erros" disabled value="${isEdit ? (t.numQuestoes - t.acertos) : ''}">
+          <input type="number" name="erros" id="input-erros" min="0" value="${isEdit ? (t.numQuestoes - t.acertos) : ''}" placeholder="Ex: 5">
         </div>
         <div class="form-row">
           <label>Taxa de acertos</label>
@@ -875,7 +875,7 @@ function openTentativaModal(tentativa = null) {
   const form = $('#form-tentativa');
   const numQuestoesInput = $('#input-num-questoes', form);
   const acertosInput = $('#input-acertos', form);
-  const displayErros = $('#display-erros', form);
+  const errosInput = $('#input-erros', form);
   const displayTaxa = $('#display-taxa', form);
 
   attachAutocomplete(form.elements.disciplina, valoresUnicos('disciplina'));
@@ -883,20 +883,35 @@ function openTentativaModal(tentativa = null) {
   attachAutocomplete(form.elements.banca, valoresUnicos('banca'));
   attachAutocomplete(form.elements.concurso, valoresUnicos('concurso'));
 
-  function atualizarCalculados() {
+  // Acertos e Erros são dois jeitos de informar o mesmo resultado — o que
+  // o usuário digitar por último é usado como referência e o outro campo
+  // (e a taxa) são recalculados automaticamente a partir dele.
+  function atualizarTaxa() {
     const num = Number(numQuestoesInput.value) || 0;
-    let acertos = Number(acertosInput.value) || 0;
-    if (acertos > num) {
-      acertos = num;
-      acertosInput.value = num;
-    }
-    const erros = Math.max(0, num - acertos);
+    const acertos = Number(acertosInput.value) || 0;
     const taxa = num ? (acertos / num) * 100 : 0;
-    displayErros.value = num ? erros : '';
     displayTaxa.value = num ? fmtPct(taxa) : '';
   }
-  numQuestoesInput.addEventListener('input', atualizarCalculados);
-  acertosInput.addEventListener('input', atualizarCalculados);
+
+  function aoDigitarAcertos() {
+    const num = Number(numQuestoesInput.value) || 0;
+    let acertos = Number(acertosInput.value) || 0;
+    if (acertos > num) { acertos = num; acertosInput.value = num; }
+    errosInput.value = num ? Math.max(0, num - acertos) : '';
+    atualizarTaxa();
+  }
+
+  function aoDigitarErros() {
+    const num = Number(numQuestoesInput.value) || 0;
+    let erros = Number(errosInput.value) || 0;
+    if (erros > num) { erros = num; errosInput.value = num; }
+    acertosInput.value = num ? Math.max(0, num - erros) : '';
+    atualizarTaxa();
+  }
+
+  numQuestoesInput.addEventListener('input', aoDigitarAcertos);
+  acertosInput.addEventListener('input', aoDigitarAcertos);
+  errosInput.addEventListener('input', aoDigitarErros);
 
   $('#btn-cancelar-tentativa').addEventListener('click', closeModal);
 
