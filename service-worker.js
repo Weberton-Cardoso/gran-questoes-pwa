@@ -4,7 +4,7 @@
  * (dados ficam no IndexedDB, não no cache).
  */
 
-const CACHE_NAME = 'trilha-aprovacao-v11';
+const CACHE_NAME = 'trilha-aprovacao-v12';
 
 const ASSETS_TO_CACHE = [
   './',

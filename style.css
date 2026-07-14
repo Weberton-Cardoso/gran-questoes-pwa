@@ -320,6 +320,16 @@ tbody tr.clickable{ cursor:pointer; }
 .form-row textarea{ resize:vertical; min-height:60px; }
 
 .autocomplete-wrap{ position:relative; }
+.autocomplete-wrap input{ padding-right:38px; }
+.autocomplete-toggle{
+  position:absolute;
+  top:0; right:0; bottom:0;
+  width:38px;
+  display:flex; align-items:center; justify-content:center;
+  background:transparent; border:none; color:var(--text-muted);
+  cursor:pointer;
+}
+.autocomplete-toggle:hover{ color:var(--text); }
 .autocomplete-list{
   display:none;
   position:absolute;

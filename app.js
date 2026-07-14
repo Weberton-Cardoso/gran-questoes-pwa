@@ -728,13 +728,21 @@ function renderTentativas(view) {
  *  como Assunto depender da Disciplina escolhida). */
 function attachAutocomplete(input, valoresOuFn) {
   const wrap = input.closest('.autocomplete-wrap');
+
+  const toggleBtn = document.createElement('button');
+  toggleBtn.type = 'button';
+  toggleBtn.className = 'autocomplete-toggle';
+  toggleBtn.setAttribute('aria-label', 'Mostrar opções');
+  toggleBtn.innerHTML = '<svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M7 10l5 5 5-5z"/></svg>';
+  wrap.appendChild(toggleBtn);
+
   const lista = document.createElement('div');
   lista.className = 'autocomplete-list';
   wrap.appendChild(lista);
 
-  function renderSugestoes() {
+  function renderSugestoes(forcarLista = false) {
     const valores = typeof valoresOuFn === 'function' ? valoresOuFn() : valoresOuFn;
-    const termo = input.value.trim().toLowerCase();
+    const termo = forcarLista ? '' : input.value.trim().toLowerCase();
     const filtradas = termo
       ? valores.filter(v => v.toLowerCase().includes(termo) && v.toLowerCase() !== termo)
       : valores;
@@ -751,8 +759,21 @@ function attachAutocomplete(input, valoresOuFn) {
     lista.classList.add('show');
   }
 
-  input.addEventListener('focus', renderSugestoes);
-  input.addEventListener('input', renderSugestoes);
+  input.addEventListener('focus', () => renderSugestoes());
+  input.addEventListener('click', () => renderSugestoes());
+  input.addEventListener('input', () => renderSugestoes());
+
+  // Botão de seta: sempre mostra a lista completa (sem filtrar pelo texto
+  // digitado), funcionando como um "select" — e fecha se já estiver aberta.
+  toggleBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (lista.classList.contains('show')) {
+      lista.classList.remove('show');
+    } else {
+      input.focus();
+      renderSugestoes(true);
+    }
+  });
 
   lista.addEventListener('mousedown', (e) => {
     // mousedown (não click) para disparar antes do blur do input
