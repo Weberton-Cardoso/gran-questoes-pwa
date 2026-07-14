@@ -103,6 +103,47 @@ async function reloadState() {
   state.simulados = simulados;
 }
 
+/** Disciplinas sugeridas por padrão no autocomplete, mesmo antes de qualquer
+ *  tentativa ser registrada com elas. */
+const DISCIPLINAS_PADRAO = [
+  'Direito Tributário',
+  'Contabilidade Geral',
+  'Direito Administrativo',
+  'Direito Constitucional',
+  'Língua Portuguesa',
+  'Raciocínio Lógico / Matemática',
+  'Noções de Informática',
+  'Legislação Tributária Municipal',
+  'Auditoria',
+  'Administração',
+  'Noções de Legislação',
+  'Estatística',
+  'Matemática Financeira',
+  'Análise de Dados',
+  'Inteligência Artificial',
+  'Direito Penal',
+  'Economia'
+];
+
+/** Lista de valores únicos (não vazios) já usados em um campo das tentativas,
+ *  em ordem alfabética — usada para popular os <datalist> de autocomplete. */
+function valoresUnicos(campo) {
+  const vistos = new Set();
+  if (campo === 'disciplina') {
+    DISCIPLINAS_PADRAO.forEach(v => vistos.add(v));
+  }
+  state.tentativas.forEach(t => {
+    const v = (t[campo] || '').trim();
+    if (v) vistos.add(v);
+  });
+  if (campo === 'disciplina') {
+    state.editais.forEach(e => (e.materias || []).forEach(m => {
+      if (m.nome) vistos.add(m.nome);
+    }));
+  }
+  return Array.from(vistos).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+}
+
 /* ============================================================
    SIDEBAR / NAVEGAÇÃO
    ============================================================ */
@@ -573,21 +614,33 @@ function openTentativaModal(tentativa = null) {
       <div class="form-grid-2">
         <div class="form-row">
           <label>Disciplina</label>
-          <input type="text" name="disciplina" required value="${escapeHtml(t.disciplina)}" placeholder="Ex: Direito Constitucional">
+          <input type="text" name="disciplina" list="lista-disciplinas" required value="${escapeHtml(t.disciplina)}" placeholder="Ex: Direito Constitucional">
+          <datalist id="lista-disciplinas">
+            ${valoresUnicos('disciplina').map(v => `<option value="${escapeHtml(v)}">`).join('')}
+          </datalist>
         </div>
         <div class="form-row">
           <label>Assunto</label>
-          <input type="text" name="assunto" required value="${escapeHtml(t.assunto)}" placeholder="Ex: Poder Constituinte">
+          <input type="text" name="assunto" list="lista-assuntos" required value="${escapeHtml(t.assunto)}" placeholder="Ex: Poder Constituinte">
+          <datalist id="lista-assuntos">
+            ${valoresUnicos('assunto').map(v => `<option value="${escapeHtml(v)}">`).join('')}
+          </datalist>
         </div>
       </div>
       <div class="form-grid-2">
         <div class="form-row">
           <label>Banca (opcional)</label>
-          <input type="text" name="banca" value="${escapeHtml(t.banca)}" placeholder="Ex: CESPE/CEBRASPE">
+          <input type="text" name="banca" list="lista-bancas" value="${escapeHtml(t.banca)}" placeholder="Ex: CESPE/CEBRASPE">
+          <datalist id="lista-bancas">
+            ${valoresUnicos('banca').map(v => `<option value="${escapeHtml(v)}">`).join('')}
+          </datalist>
         </div>
         <div class="form-row">
           <label>Concurso (opcional)</label>
-          <input type="text" name="concurso" value="${escapeHtml(t.concurso)}" placeholder="Ex: PF - Agente">
+          <input type="text" name="concurso" list="lista-concursos" value="${escapeHtml(t.concurso)}" placeholder="Ex: PF - Agente">
+          <datalist id="lista-concursos">
+            ${valoresUnicos('concurso').map(v => `<option value="${escapeHtml(v)}">`).join('')}
+          </datalist>
         </div>
       </div>
       <div class="form-grid-2">
