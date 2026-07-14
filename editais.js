@@ -122,8 +122,9 @@ function _pareceDisciplina(linha) {
 }
 
 /** A partir de um texto (já recortado a partir do início do conteúdo programático),
- *  identifica disciplinas (colunas) e tópicos (cards) dentro de cada uma. */
-function parseDisciplinasTopicos(texto) {
+ *  identifica disciplinas (colunas) e tópicos (cards) dentro de cada uma, usando
+ *  marcadores/numeração como pista (bom para textos brutos de edital em PDF). */
+function _parseHeuristicaMarcadores(texto) {
   const linhas = texto.split('\n').map(l => l.trim()).filter(Boolean);
   const disciplinas = [];
   let atual = null;
@@ -149,6 +150,87 @@ function parseDisciplinasTopicos(texto) {
   });
 
   return disciplinas.filter(d => d.topicos.length > 0);
+}
+
+const _PALAVRAS_CABECALHO_TABELA = ['disciplina', 'disciplinas', 'topico', 'topicos', 'tópico', 'tópicos', 'assunto', 'assuntos'];
+
+/** Formato 1 (recomendado): uma disciplina por linha, no formato
+ *  "Nome da disciplina: tópico 1; tópico 2; tópico 3" (aceita ; ou , como separador). */
+function _parseFormatoDoisPontos(texto) {
+  const linhas = texto.split('\n').map(l => l.trim()).filter(Boolean);
+  if (!linhas.length) return [];
+  const disciplinas = [];
+  let linhasReconhecidas = 0;
+
+  linhas.forEach(linha => {
+    const m = linha.match(/^([^:\n]{2,90}):\s*(.+)$/);
+    if (!m) return;
+    const nome = m[1].trim();
+    const topicosStr = m[2].trim();
+    if (!nome || !topicosStr) return;
+
+    const topicos = topicosStr.split(/[;,]/).map(s => s.trim()).filter(Boolean);
+    if (!topicos.length) return;
+
+    linhasReconhecidas++;
+    let disciplina = disciplinas.find(d => _norm(d.nome) === _norm(nome));
+    if (!disciplina) { disciplina = { nome, topicos: [] }; disciplinas.push(disciplina); }
+    topicos.forEach(tp => {
+      if (!disciplina.topicos.some(t => _norm(t.nome) === _norm(tp))) disciplina.topicos.push({ nome: tp });
+    });
+  });
+
+  // Só aceita este formato se a maioria das linhas realmente bateu no padrão
+  // (evita interpretar errado um texto bruto de edital que tenha ":" em outro contexto).
+  if (linhasReconhecidas > 0 && linhasReconhecidas >= linhas.length * 0.6) return disciplinas;
+  return [];
+}
+
+/** Formato 2 (também aceito): disciplina em uma linha sozinha, seguida
+ *  imediatamente pela linha com os tópicos separados por ; — o mesmo formato
+ *  de quando se cola uma tabela de duas colunas (Disciplina / Tópicos) copiada
+ *  do Word, Google Sheets etc. */
+function _parseFormatoPares(texto) {
+  const linhas = texto.split('\n').map(l => l.trim())
+    .filter(Boolean)
+    .filter(l => !_PALAVRAS_CABECALHO_TABELA.includes(_norm(l)));
+
+  const disciplinas = [];
+  let paresEncontrados = 0;
+  let i = 0;
+  while (i < linhas.length - 1) {
+    const possivelNome = linhas[i];
+    const possivelTopicos = linhas[i + 1];
+    if (!possivelNome.includes(';') && possivelTopicos.includes(';')) {
+      const topicos = possivelTopicos.split(';').map(s => s.trim()).filter(Boolean);
+      if (topicos.length >= 2) {
+        let disciplina = disciplinas.find(d => _norm(d.nome) === _norm(possivelNome));
+        if (!disciplina) { disciplina = { nome: possivelNome, topicos: [] }; disciplinas.push(disciplina); }
+        topicos.forEach(tp => {
+          if (!disciplina.topicos.some(t => _norm(t.nome) === _norm(tp))) disciplina.topicos.push({ nome: tp });
+        });
+        paresEncontrados++;
+        i += 2;
+        continue;
+      }
+    }
+    i++;
+  }
+  return paresEncontrados > 0 ? disciplinas : [];
+}
+
+/** Ponto de entrada da análise de texto: tenta primeiro os dois formatos
+ *  simples e confiáveis (colar uma lista organizada); só cai na heurística
+ *  de marcadores/números (menos precisa) se o texto parecer mesmo um
+ *  despejo bruto de PDF de edital. */
+function parseDisciplinasTopicos(texto) {
+  const porDoisPontos = _parseFormatoDoisPontos(texto);
+  if (porDoisPontos.length) return porDoisPontos;
+
+  const porPares = _parseFormatoPares(texto);
+  if (porPares.length) return porPares;
+
+  return _parseHeuristicaMarcadores(texto);
 }
 
 /* ============================================================
@@ -210,14 +292,34 @@ function renderImportarEdital(view) {
     </div>
 
     <div class="import-panel" data-panel="texto">
+      <div class="card mb-12" style="background:var(--surface-2);">
+        <div class="card-title" style="font-size:14px;">Formatos aceitos</div>
+        <p class="text-muted" style="font-size:13px;margin:0 0 8px;">
+          <strong>1) Uma linha por disciplina</strong> — nome, dois-pontos e os tópicos separados por ; ou ,
+        </p>
+        <pre style="font-size:12.5px;background:var(--surface);padding:8px 10px;border-radius:8px;overflow-x:auto;margin:0 0 10px;">Direito Administrativo: Atos Administrativos; Licitações; Contratos
+Direito Constitucional: Poder Constituinte; Controle de Constitucionalidade</pre>
+        <p class="text-muted" style="font-size:13px;margin:0 0 8px;">
+          <strong>2) Tabela de duas colunas colada</strong> (Disciplina numa linha, tópicos na linha de baixo separados por ;)
+        </p>
+        <pre style="font-size:12.5px;background:var(--surface);padding:8px 10px;border-radius:8px;overflow-x:auto;margin:0;">Língua Portuguesa
+Interpretação de textos; Ortografia; Concordância
+Direito Constitucional
+Poder Constituinte; Controle de Constitucionalidade</pre>
+      </div>
       <div class="form-row">
-        <label>Cole aqui o texto do edital</label>
-        <textarea id="imp-texto" rows="10" placeholder="Cole o texto completo do edital..."></textarea>
+        <label>Cole aqui o texto (nesse formato)</label>
+        <textarea id="imp-texto" rows="10" placeholder="Direito Administrativo: Atos Administrativos; Licitações; Contratos&#10;Direito Constitucional: Poder Constituinte; Controle de Constitucionalidade&#10;..."></textarea>
       </div>
       <button class="btn btn-primary" id="btn-analisar-texto">Analisar texto</button>
     </div>
 
     <div class="import-panel" data-panel="pdf" hidden>
+      <p class="text-muted" style="font-size:13px;">
+        A leitura automática de PDF é menos confiável, porque a formatação varia muito de edital para edital.
+        Se puder, prefira copiar o conteúdo programático do PDF e colar na aba "Colar texto" no formato acima —
+        funciona muito melhor.
+      </p>
       <div class="form-row">
         <label>Selecione o arquivo PDF do edital</label>
         <input type="file" id="imp-pdf" accept="application/pdf">
@@ -287,9 +389,20 @@ function renderImportarEdital(view) {
   });
 
   function iniciarAnalise(texto) {
+    // Primeiro tenta os formatos simples e confiáveis (lista organizada colada
+    // diretamente) — não depende de achar "onde começa o edital".
+    const limpo = _parseFormatoDoisPontos(texto).length ? _parseFormatoDoisPontos(texto) : _parseFormatoPares(texto);
+    if (limpo.length) {
+      _importParsedDisciplinas = limpo;
+      renderPreview(null);
+      return;
+    }
+
+    // Só cai aqui para texto bruto de edital em PDF (com cronograma, cabeçalhos
+    // de página etc. misturados) — tenta achar o início do conteúdo programático.
     const achado = encontrarInicioConteudoProgramatico(texto);
     if (achado) {
-      _importParsedDisciplinas = parseDisciplinasTopicos(texto.slice(achado.index));
+      _importParsedDisciplinas = _parseHeuristicaMarcadores(texto.slice(achado.index));
       renderPreview(achado.header);
     } else {
       renderEscolhaInicio(texto);
@@ -312,7 +425,7 @@ function renderImportarEdital(view) {
       el.addEventListener('click', () => {
         const i = Number(el.dataset.linha);
         const textoRestante = linhas.slice(i).join('\n');
-        _importParsedDisciplinas = parseDisciplinasTopicos(textoRestante);
+        _importParsedDisciplinas = _parseHeuristicaMarcadores(textoRestante);
         renderPreview(linhas[i].trim());
       });
     });
