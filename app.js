@@ -122,8 +122,126 @@ const DISCIPLINAS_PADRAO = [
   'Análise de Dados',
   'Inteligência Artificial',
   'Direito Penal',
-  'Economia'
+  'Economia',
+  'Administração Pública',
+  'Administração Financeira e Orçamentária',
+  'Contabilidade Pública',
+  'Controle Externo',
+  'Auditoria Governamental',
+  'Tecnologia da Informação',
+  'Ética no Serviço Público',
+  'Lei Orgânica do Distrito Federal',
+  'Regime Jurídico dos Servidores do DF',
+  'Conhecimentos sobre o Distrito Federal',
+  'Política para Mulheres',
+  'Primeiros Socorros'
 ];
+
+/** Tópicos sugeridos por padrão para cada disciplina (chave = nome exato
+ *  da disciplina em DISCIPLINAS_PADRAO). Preencha aqui conforme for
+ *  passando as listas — o app já funciona sem isso, usando o histórico. */
+const TOPICOS_PADRAO = {
+  'Língua Portuguesa': [
+    'Interpretação de textos', 'Tipologia textual', 'Ortografia', 'Acentuação',
+    'Classes de palavras', 'Sintaxe', 'Concordância', 'Regência', 'Crase',
+    'Pontuação', 'Coesão', 'Coerência', 'Reescrita', 'Redação oficial'
+  ],
+  'Direito Constitucional': [
+    'Constituição', 'Princípios Fundamentais', 'Direitos e Garantias',
+    'Direitos Sociais', 'Organização do Estado', 'Administração Pública',
+    'Poder Legislativo', 'Poder Executivo', 'Poder Judiciário',
+    'Controle de Constitucionalidade'
+  ],
+  'Direito Administrativo': [
+    'Princípios', 'Atos Administrativos', 'Poderes Administrativos',
+    'Serviços Públicos', 'Licitações', 'Contratos',
+    'Responsabilidade Civil do Estado', 'Processo Administrativo', 'Agentes Públicos'
+  ],
+  'Administração Pública': [
+    'Administração Geral', 'Planejamento Estratégico', 'Organização', 'Liderança',
+    'Controle', 'Gestão de Pessoas', 'Gestão por Processos', 'Qualidade',
+    'Governança', 'Gestão de Riscos'
+  ],
+  'Administração Financeira e Orçamentária': [
+    'Orçamento Público', 'PPA', 'LDO', 'LOA', 'Créditos Adicionais',
+    'Receita Pública', 'Despesa Pública', 'Restos a Pagar', 'LRF'
+  ],
+  'Contabilidade Pública': [
+    'Patrimônio Público', 'Plano de Contas', 'MCASP', 'Demonstrações Contábeis',
+    'Receita', 'Despesa', 'NBC TSP'
+  ],
+  'Controle Externo': [
+    'Sistemas de Controle', 'Tribunais de Contas', 'Fiscalização',
+    'Prestação de Contas', 'Auditoria Governamental', 'Responsabilização', 'Sanções'
+  ],
+  'Auditoria Governamental': [
+    'Normas', 'Planejamento', 'Papéis de Trabalho', 'Evidências', 'Materialidade',
+    'Risco', 'Relatórios', 'Auditoria Operacional', 'Auditoria de Conformidade'
+  ],
+  'Estatística': [
+    'Estatística Descritiva', 'Probabilidade', 'Distribuições', 'Inferência',
+    'Intervalos de Confiança', 'Testes de Hipóteses', 'Correlação', 'Regressão'
+  ],
+  'Raciocínio Lógico / Matemática': [
+    'Proposições', 'Conectivos', 'Tabelas-Verdade', 'Equivalências', 'Negação',
+    'Argumentação', 'Conjuntos', 'Contagem', 'Probabilidade'
+  ],
+  'Tecnologia da Informação': [
+    'Hardware', 'Software', 'Redes', 'Segurança', 'Banco de Dados',
+    'Computação em Nuvem', 'Governança de TI', 'LGPD'
+  ],
+  'Ética no Serviço Público': [
+    'Ética', 'Moral', 'Código de Ética', 'Deveres', 'Infrações', 'Processo Disciplinar'
+  ],
+  'Lei Orgânica do Distrito Federal': [
+    'Organização do DF', 'Competências', 'Administração Pública', 'Poderes',
+    'Tributação', 'Orçamento'
+  ],
+  'Regime Jurídico dos Servidores do DF': [
+    'LC 840/2011', 'Provimento', 'Direitos', 'Deveres', 'Licenças',
+    'Processo Disciplinar', 'Penalidades'
+  ],
+  'Conhecimentos sobre o Distrito Federal': [
+    'História', 'Geografia', 'Economia', 'Cultura', 'RIDE', 'Atualidades do DF'
+  ],
+  'Política para Mulheres': [
+    'Plano Distrital', 'Igualdade de Gênero', 'Violência contra a Mulher', 'Políticas Públicas'
+  ],
+  'Primeiros Socorros': [
+    'Avaliação Inicial', 'Suporte Básico de Vida', 'Hemorragias', 'Fraturas',
+    'Queimaduras', 'Convulsões', 'Engasgamento', 'PCR'
+  ]
+};
+
+function _norm(s) { return (s || '').trim().toLowerCase(); }
+
+/** Lista de assuntos sugeridos para uma disciplina específica: junta os
+ *  tópicos padrão cadastrados + os assuntos já usados no histórico para
+ *  essa mesma disciplina + tópicos de editais importados para ela. */
+function valoresAssuntoParaDisciplina(disciplina) {
+  const alvo = _norm(disciplina);
+  const vistos = new Set();
+
+  if (alvo) {
+    const chavePadrao = Object.keys(TOPICOS_PADRAO).find(k => _norm(k) === alvo);
+    if (chavePadrao) TOPICOS_PADRAO[chavePadrao].forEach(v => vistos.add(v));
+  }
+
+  state.tentativas.forEach(t => {
+    if (!alvo || _norm(t.disciplina) === alvo) {
+      const v = (t.assunto || '').trim();
+      if (v) vistos.add(v);
+    }
+  });
+
+  state.editais.forEach(e => (e.materias || []).forEach(m => {
+    if (!alvo || _norm(m.nome) === alvo) {
+      (m.topicos || []).forEach(tp => { if (tp.nome) vistos.add(tp.nome); });
+    }
+  }));
+
+  return Array.from(vistos).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+}
 
 /** Lista de valores únicos (não vazios) já usados em um campo das tentativas,
  *  em ordem alfabética — usada para popular os <datalist> de autocomplete. */
@@ -604,14 +722,18 @@ function renderTentativas(view) {
 
 /** Liga uma lista de sugestões clicável a um <input>, dentro do
  *  .autocomplete-wrap que o envolve. Mais confiável que <datalist>,
- *  que no Chrome para Android costuma não exibir sugestão nenhuma. */
-function attachAutocomplete(input, valores) {
+ *  que no Chrome para Android costuma não exibir sugestão nenhuma.
+ *  `valoresOuFn` pode ser um array fixo ou uma função sem argumentos que
+ *  devolve o array na hora (usado quando a lista depende de outro campo,
+ *  como Assunto depender da Disciplina escolhida). */
+function attachAutocomplete(input, valoresOuFn) {
   const wrap = input.closest('.autocomplete-wrap');
   const lista = document.createElement('div');
   lista.className = 'autocomplete-list';
   wrap.appendChild(lista);
 
   function renderSugestoes() {
+    const valores = typeof valoresOuFn === 'function' ? valoresOuFn() : valoresOuFn;
     const termo = input.value.trim().toLowerCase();
     const filtradas = termo
       ? valores.filter(v => v.toLowerCase().includes(termo) && v.toLowerCase() !== termo)
@@ -736,7 +858,7 @@ function openTentativaModal(tentativa = null) {
   const displayTaxa = $('#display-taxa', form);
 
   attachAutocomplete(form.elements.disciplina, valoresUnicos('disciplina'));
-  attachAutocomplete(form.elements.assunto, valoresUnicos('assunto'));
+  attachAutocomplete(form.elements.assunto, () => valoresAssuntoParaDisciplina(form.elements.disciplina.value));
   attachAutocomplete(form.elements.banca, valoresUnicos('banca'));
   attachAutocomplete(form.elements.concurso, valoresUnicos('concurso'));
 
@@ -779,7 +901,37 @@ function openTentativaModal(tentativa = null) {
       tipo: fd.get('tipo'),
       observacoes: fd.get('observacoes').trim()
     };
-    if (isEdit) {
+
+    // Ao REGISTRAR uma nova tentativa (não ao editar), se já existir uma
+    // tentativa da mesma disciplina + assunto + tipo no mesmo dia, soma as
+    // questões nela em vez de criar um registro separado — assim várias
+    // rodadas do mesmo assunto no mesmo dia viram um único registro.
+    const existente = !isEdit && state.tentativas.find(x =>
+      x.data === obj.data &&
+      x.tipo === obj.tipo &&
+      x.disciplina.trim().toLowerCase() === obj.disciplina.toLowerCase() &&
+      x.assunto.trim().toLowerCase() === obj.assunto.toLowerCase()
+    );
+
+    if (existente) {
+      const novoNum = existente.numQuestoes + obj.numQuestoes;
+      const novoAcertos = existente.acertos + obj.acertos;
+      const novoErros = novoNum - novoAcertos;
+      const novaTaxa = novoNum ? (novoAcertos / novoNum) * 100 : 0;
+      const obsUnidas = [existente.observacoes, obj.observacoes].filter(Boolean).join(' | ');
+
+      await db.tentativas.update({
+        ...existente,
+        banca: existente.banca || obj.banca,
+        concurso: existente.concurso || obj.concurso,
+        numQuestoes: novoNum,
+        acertos: novoAcertos,
+        erros: novoErros,
+        taxa: novaTaxa,
+        observacoes: obsUnidas
+      });
+      showToast(`Somado ao registro de hoje: ${novoNum} questões no total.`, 'success');
+    } else if (isEdit) {
       await db.tentativas.update({ id: t.id, ...obj });
       showToast('Tentativa atualizada.', 'success');
     } else {
@@ -1248,6 +1400,16 @@ function renderConfiguracoes(view) {
     </div>
 
     <div class="card mt-12">
+      <div class="card-title">Consolidar tentativas duplicadas</div>
+      <p class="text-muted" style="font-size:13.5px;margin-top:0;">
+        Junta em um único registro as tentativas com a mesma disciplina, assunto, tipo e data
+        — útil se você registrou várias rodadas separadas do mesmo assunto no mesmo dia antes
+        dessa opção existir. Essa ação não pode ser desfeita.
+      </p>
+      <button class="btn" id="btn-consolidar">Consolidar agora</button>
+    </div>
+
+    <div class="card mt-12">
       <div class="card-title">Zona de risco</div>
       <p class="text-muted" style="font-size:13.5px;margin-top:0;">Isto apaga permanentemente tentativas, editais e simulados deste dispositivo.</p>
       <button class="btn btn-danger" id="btn-zerar">Zerar todas as estatísticas</button>
@@ -1286,6 +1448,47 @@ function renderConfiguracoes(view) {
       showToast('Arquivo inválido. Verifique o backup.', 'danger');
     }
     fileInput.value = '';
+  });
+
+  $('#btn-consolidar').addEventListener('click', async () => {
+    const grupos = new Map();
+    state.tentativas.forEach(t => {
+      const chave = [t.data, t.tipo, t.disciplina.trim().toLowerCase(), t.assunto.trim().toLowerCase()].join('|');
+      if (!grupos.has(chave)) grupos.set(chave, []);
+      grupos.get(chave).push(t);
+    });
+
+    const gruposComDuplicata = Array.from(grupos.values()).filter(g => g.length > 1);
+    if (!gruposComDuplicata.length) {
+      showToast('Nenhuma tentativa duplicada encontrada.', '');
+      return;
+    }
+
+    const totalDuplicatas = gruposComDuplicata.reduce((s, g) => s + g.length, 0);
+    if (!confirm(`Encontrei ${gruposComDuplicata.length} assunto(s) com registros repetidos no mesmo dia (${totalDuplicatas} tentativas ao todo). Elas serão somadas em ${gruposComDuplicata.length} registro(s) único(s). Continuar?`)) return;
+
+    for (const grupo of gruposComDuplicata) {
+      const numQuestoes = grupo.reduce((s, t) => s + t.numQuestoes, 0);
+      const acertos = grupo.reduce((s, t) => s + t.acertos, 0);
+      const erros = numQuestoes - acertos;
+      const taxa = numQuestoes ? (acertos / numQuestoes) * 100 : 0;
+      const observacoes = grupo.map(t => t.observacoes).filter(Boolean).join(' | ');
+      const base = grupo[0];
+
+      await db.tentativas.update({
+        ...base,
+        numQuestoes, acertos, erros, taxa, observacoes,
+        banca: grupo.map(t => t.banca).find(Boolean) || '',
+        concurso: grupo.map(t => t.concurso).find(Boolean) || ''
+      });
+      for (const t of grupo.slice(1)) {
+        await db.tentativas.remove(t.id);
+      }
+    }
+
+    await reloadState();
+    showToast(`${gruposComDuplicata.length} registro(s) consolidado(s).`, 'success');
+    router();
   });
 
   $('#btn-zerar').addEventListener('click', async () => {
