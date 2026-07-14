@@ -602,6 +602,53 @@ function renderTentativas(view) {
   }
 }
 
+/** Liga uma lista de sugestões clicável a um <input>, dentro do
+ *  .autocomplete-wrap que o envolve. Mais confiável que <datalist>,
+ *  que no Chrome para Android costuma não exibir sugestão nenhuma. */
+function attachAutocomplete(input, valores) {
+  const wrap = input.closest('.autocomplete-wrap');
+  const lista = document.createElement('div');
+  lista.className = 'autocomplete-list';
+  wrap.appendChild(lista);
+
+  function renderSugestoes() {
+    const termo = input.value.trim().toLowerCase();
+    const filtradas = termo
+      ? valores.filter(v => v.toLowerCase().includes(termo) && v.toLowerCase() !== termo)
+      : valores;
+
+    if (!filtradas.length) {
+      lista.classList.remove('show');
+      lista.innerHTML = '';
+      return;
+    }
+
+    lista.innerHTML = filtradas.slice(0, 30)
+      .map(v => `<div class="autocomplete-item">${escapeHtml(v)}</div>`)
+      .join('');
+    lista.classList.add('show');
+  }
+
+  input.addEventListener('focus', renderSugestoes);
+  input.addEventListener('input', renderSugestoes);
+
+  lista.addEventListener('mousedown', (e) => {
+    // mousedown (não click) para disparar antes do blur do input
+    const item = e.target.closest('.autocomplete-item');
+    if (!item) return;
+    input.value = item.textContent;
+    lista.classList.remove('show');
+    lista.innerHTML = '';
+    input.dispatchEvent(new Event('input'));
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!wrap.contains(e.target)) {
+      lista.classList.remove('show');
+    }
+  });
+}
+
 /* ---- Modal de cadastro/edição de tentativa ---- */
 
 function openTentativaModal(tentativa = null) {
@@ -614,33 +661,29 @@ function openTentativaModal(tentativa = null) {
       <div class="form-grid-2">
         <div class="form-row">
           <label>Disciplina</label>
-          <input type="text" name="disciplina" list="lista-disciplinas" required value="${escapeHtml(t.disciplina)}" placeholder="Ex: Direito Constitucional">
-          <datalist id="lista-disciplinas">
-            ${valoresUnicos('disciplina').map(v => `<option value="${escapeHtml(v)}">`).join('')}
-          </datalist>
+          <div class="autocomplete-wrap">
+            <input type="text" name="disciplina" autocomplete="off" required value="${escapeHtml(t.disciplina)}" placeholder="Ex: Direito Constitucional">
+          </div>
         </div>
         <div class="form-row">
           <label>Assunto</label>
-          <input type="text" name="assunto" list="lista-assuntos" required value="${escapeHtml(t.assunto)}" placeholder="Ex: Poder Constituinte">
-          <datalist id="lista-assuntos">
-            ${valoresUnicos('assunto').map(v => `<option value="${escapeHtml(v)}">`).join('')}
-          </datalist>
+          <div class="autocomplete-wrap">
+            <input type="text" name="assunto" autocomplete="off" required value="${escapeHtml(t.assunto)}" placeholder="Ex: Poder Constituinte">
+          </div>
         </div>
       </div>
       <div class="form-grid-2">
         <div class="form-row">
           <label>Banca (opcional)</label>
-          <input type="text" name="banca" list="lista-bancas" value="${escapeHtml(t.banca)}" placeholder="Ex: CESPE/CEBRASPE">
-          <datalist id="lista-bancas">
-            ${valoresUnicos('banca').map(v => `<option value="${escapeHtml(v)}">`).join('')}
-          </datalist>
+          <div class="autocomplete-wrap">
+            <input type="text" name="banca" autocomplete="off" value="${escapeHtml(t.banca)}" placeholder="Ex: CESPE/CEBRASPE">
+          </div>
         </div>
         <div class="form-row">
           <label>Concurso (opcional)</label>
-          <input type="text" name="concurso" list="lista-concursos" value="${escapeHtml(t.concurso)}" placeholder="Ex: PF - Agente">
-          <datalist id="lista-concursos">
-            ${valoresUnicos('concurso').map(v => `<option value="${escapeHtml(v)}">`).join('')}
-          </datalist>
+          <div class="autocomplete-wrap">
+            <input type="text" name="concurso" autocomplete="off" value="${escapeHtml(t.concurso)}" placeholder="Ex: PF - Agente">
+          </div>
         </div>
       </div>
       <div class="form-grid-2">
@@ -691,6 +734,11 @@ function openTentativaModal(tentativa = null) {
   const acertosInput = $('#input-acertos', form);
   const displayErros = $('#display-erros', form);
   const displayTaxa = $('#display-taxa', form);
+
+  attachAutocomplete(form.elements.disciplina, valoresUnicos('disciplina'));
+  attachAutocomplete(form.elements.assunto, valoresUnicos('assunto'));
+  attachAutocomplete(form.elements.banca, valoresUnicos('banca'));
+  attachAutocomplete(form.elements.concurso, valoresUnicos('concurso'));
 
   function atualizarCalculados() {
     const num = Number(numQuestoesInput.value) || 0;
