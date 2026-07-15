@@ -405,9 +405,30 @@ tbody tr.clickable{ cursor:pointer; }
 }
 .kanban-col-head{
   display:flex; align-items:center; justify-content:space-between; gap:8px;
-  margin-bottom:10px; padding:0 2px;
+  margin-bottom:10px; padding:0 2px; position:relative;
 }
-.kanban-col-head h3{ font-family:var(--font-display); font-size:14px; margin:0; }
+.kanban-col-head h3{
+  font-family:var(--font-display); font-size:13.5px; margin:0;
+  text-transform:uppercase; letter-spacing:.4px; font-weight:800;
+}
+.kanban-col-head-right{ display:flex; align-items:center; gap:6px; }
+.kanban-col-menu-btn{
+  background:transparent; border:none; color:var(--text-muted); cursor:pointer;
+  padding:4px; border-radius:6px; display:flex;
+}
+.kanban-col-menu-btn:hover{ background:var(--surface-hover); color:var(--text); }
+.kanban-col-menu{
+  position:absolute; top:100%; right:0; margin-top:4px; z-index:40;
+  background:var(--surface-2); border:1px solid var(--border); border-radius:10px;
+  box-shadow:var(--shadow); overflow:hidden; min-width:170px; display:none;
+}
+.kanban-col-menu.show{ display:block; }
+.kanban-col-menu button{
+  display:block; width:100%; text-align:left; background:none; border:none;
+  color:var(--text); font-size:13px; padding:10px 14px; cursor:pointer;
+}
+.kanban-col-menu button:hover{ background:var(--surface-hover); }
+.kanban-col-menu button.danger{ color:var(--danger); }
 .kanban-col-count{
   background:var(--surface-2); color:var(--text-muted); font-size:11.5px; font-weight:700;
   border-radius:999px; padding:2px 8px;
@@ -416,16 +437,28 @@ tbody tr.clickable{ cursor:pointer; }
 .kanban-col-body.drag-over{ background:var(--gold-soft); outline:2px dashed var(--gold); }
 .kanban-col-empty{ color:var(--text-faint); font-size:12.5px; text-align:center; padding:14px 4px; }
 .kanban-card{
-  background:var(--surface-2); border:1px solid var(--border); border-left:3px solid var(--text-faint);
+  background:var(--surface-2); border:1px solid var(--border);
   border-radius:var(--radius-sm); padding:10px 12px; cursor:grab; transition:box-shadow .15s var(--ease);
 }
 .kanban-card:active{ cursor:grabbing; }
 .kanban-card.dragging{ opacity:.5; }
-.kanban-card.status-em_estudo{ border-left-color:var(--info); }
-.kanban-card.status-em_revisao{ border-left-color:var(--gold); }
-.kanban-card.status-dominado{ border-left-color:var(--success); }
-.kanban-card-head{ margin-bottom:8px; }
-.kanban-card-nome{ font-weight:600; font-size:13.5px; }
+.kanban-card-top{ display:flex; align-items:flex-start; gap:10px; }
+.kanban-checkbox{
+  flex:0 0 auto; width:22px; height:22px; border-radius:50%;
+  border:2px solid var(--text-faint); background:transparent; cursor:pointer;
+  display:flex; align-items:center; justify-content:center; padding:0; margin-top:1px;
+}
+.kanban-checkbox.checked{ background:var(--success); border-color:var(--success); }
+.kanban-card-titulo{ font-weight:600; font-size:13.5px; line-height:1.35; flex:1; }
+.kanban-card-badges{
+  display:flex; flex-wrap:wrap; align-items:center; gap:10px;
+  margin:8px 0 0 32px; font-size:11.5px; color:var(--text-muted);
+}
+.kb-badge{ display:inline-flex; align-items:center; gap:4px; }
+.kb-badge-clicavel{ cursor:pointer; }
+.kb-badge-clicavel:hover{ color:var(--text); }
+.kb-badge-pct{ font-weight:700; font-family:var(--font-mono); color:var(--text); }
+.kanban-card-detalhe{ margin:10px 0 0 32px; padding-top:10px; border-top:1px solid var(--border); }
 .kanban-status-select{
   width:100%; background:var(--surface); border:1px solid var(--border); color:var(--text);
   padding:6px 8px; border-radius:var(--radius-sm); font-size:12px; font-weight:600;
@@ -435,6 +468,7 @@ tbody tr.clickable{ cursor:pointer; }
 }
 .kanban-card-stats strong{ color:var(--text); font-family:var(--font-mono); }
 .kanban-card-foot{ margin-top:8px; font-size:11.5px; color:var(--text-faint); }
+
 
 /* assistente de importação inteligente de editais */
 .import-tabs{ display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; }
@@ -474,6 +508,8 @@ tbody tr.clickable{ cursor:pointer; }
 .gap-8{ gap:8px; }
 .gap-12{ gap:12px; }
 .mb-12{ margin-bottom:12px; }
+.mb-16{ margin-bottom:16px; }
+.mt-8{ margin-top:8px; }
 .mt-12{ margin-top:12px; }
 .text-muted{ color:var(--text-muted); }
 .section-title{ font-family:var(--font-display); font-size:17px; font-weight:700; margin:28px 0 14px; }
@@ -570,3 +606,20 @@ tr.clickable:hover{ background:var(--surface-hover); }
 .status-badge{ font-size:14px; }
 tr.row-invalido{ opacity:.6; }
 tr.row-motivo td{ padding-top:0; padding-bottom:8px; border-top:none; }
+
+/* ---- Ciclo de Estudos ---- */
+.ciclo-sessao-ativa{
+  border-color:var(--gold); background:linear-gradient(180deg, var(--gold-soft), var(--surface));
+}
+.ciclo-cronometro{
+  font-family:var(--font-mono); font-size:44px; font-weight:700; letter-spacing:1px;
+  color:var(--gold); text-align:center; padding:10px 0;
+}
+.ciclo-lista{ display:flex; flex-direction:column; gap:14px; }
+.ciclo-materia-row{
+  padding:12px 14px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface-2);
+}
+.ciclo-materia-row.ativa{ border-color:var(--gold); }
+.ciclo-materia-topo{ display:flex; justify-content:space-between; align-items:center; gap:8px; }
+.ciclo-materia-nome{ font-weight:600; font-size:14px; }
+.ciclo-materia-acoes{ display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }

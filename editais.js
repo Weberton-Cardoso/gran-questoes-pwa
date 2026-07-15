@@ -765,7 +765,16 @@ function renderEditalDetalhe(view, idStr) {
         <div class="kanban-col">
           <div class="kanban-col-head">
             <h3>${escapeHtml(m.nome)}</h3>
-            <span class="kanban-col-count">${m.topicos.length}</span>
+            <div class="kanban-col-head-right">
+              <span class="kanban-col-count">${m.topicos.length}</span>
+              <button class="kanban-col-menu-btn" data-menu-mi="${mi}" title="Opções da disciplina">
+                <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 8a2 2 0 100-4 2 2 0 000 4zm0 6a2 2 0 100-4 2 2 0 000 4zm0 6a2 2 0 100-4 2 2 0 000 4z"/></svg>
+              </button>
+              <div class="kanban-col-menu" data-menu-alvo="${mi}">
+                <button data-renomear-mi="${mi}">Renomear disciplina</button>
+                <button class="danger" data-remover-mi="${mi}">Remover disciplina</button>
+              </div>
+            </div>
           </div>
           <div class="kanban-col-body" data-drop-mi="${mi}">${cardsHtml || '<div class="kanban-col-empty">Nenhum tópico neste filtro.</div>'}</div>
         </div>
@@ -778,6 +787,65 @@ function renderEditalDetalhe(view, idStr) {
       sel.addEventListener('change', async () => {
         const mi = Number(sel.dataset.mi), ti = Number(sel.dataset.ti);
         edital.materias[mi].topicos[ti].status = sel.value;
+        await db.editais.update(edital);
+        await reloadState();
+        desenharBoard();
+      });
+    });
+
+    $$('.kanban-checkbox', board).forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const mi = Number(btn.dataset.checkMi), ti = Number(btn.dataset.checkTi);
+        const topico = edital.materias[mi].topicos[ti];
+        topico.status = topico.status === 'dominado' ? 'nao_iniciado' : 'dominado';
+        await db.editais.update(edital);
+        await reloadState();
+        desenharBoard();
+      });
+    });
+
+    $$('[data-expand-mi]', board).forEach(el => {
+      el.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const mi = el.dataset.expandMi, ti = el.dataset.expandTi;
+        const detalhe = $(`#kb-detalhe-${mi}-${ti}`, board);
+        if (detalhe) detalhe.hidden = !detalhe.hidden;
+      });
+    });
+
+    $$('.kanban-col-menu-btn', board).forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const menu = $(`.kanban-col-menu[data-menu-alvo="${btn.dataset.menuMi}"]`, board);
+        const jaAberto = menu.classList.contains('show');
+        $$('.kanban-col-menu', board).forEach(m => m.classList.remove('show'));
+        if (!jaAberto) menu.classList.add('show');
+      });
+    });
+    document.addEventListener('click', () => $$('.kanban-col-menu', board).forEach(m => m.classList.remove('show')));
+
+    $$('[data-renomear-mi]', board).forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const mi = Number(btn.dataset.renomearMi);
+        const materia = edital.materias[mi];
+        const novoNome = prompt('Novo nome da disciplina:', materia.nome);
+        if (!novoNome || !novoNome.trim() || novoNome.trim() === materia.nome) return;
+        materia.nome = novoNome.trim();
+        await db.editais.update(edital);
+        await reloadState();
+        desenharBoard();
+      });
+    });
+
+    $$('[data-remover-mi]', board).forEach(btn => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const mi = Number(btn.dataset.removerMi);
+        const materia = edital.materias[mi];
+        if (!confirm(`Remover a disciplina "${materia.nome}" e todos os seus ${materia.topicos.length} tópico(s) deste edital? As tentativas registradas continuam preservadas nas estatísticas.`)) return;
+        edital.materias.splice(mi, 1);
         await db.editais.update(edital);
         await reloadState();
         desenharBoard();
@@ -812,28 +880,37 @@ function renderEditalDetalhe(view, idStr) {
 }
 
 function renderKanbanCard(t, mi, ti, stats) {
+  const marcado = t.status === 'dominado';
   const pct = stats ? stats.taxa : 0;
   return `
     <div class="kanban-card status-${t.status}" draggable="true" data-mi="${mi}" data-ti="${ti}">
-      <div class="kanban-card-head">
-        <span class="kanban-card-nome">${escapeHtml(t.nome)}</span>
+      <div class="kanban-card-top">
+        <button type="button" class="kanban-checkbox ${marcado ? 'checked' : ''}" data-check-mi="${mi}" data-check-ti="${ti}" title="${marcado ? 'Desmarcar como dominado' : 'Marcar como dominado'}">
+          ${marcado ? '<svg viewBox="0 0 24 24" width="13" height="13"><path fill="#0B0F14" d="M9 16.2l-3.5-3.6L4 14.1l5 5.1L20 8.1l-1.5-1.5z"/></svg>' : ''}
+        </button>
+        <span class="kanban-card-titulo">${escapeHtml(t.nome)}</span>
       </div>
-      <select class="kanban-status-select" data-mi="${mi}" data-ti="${ti}">
-        ${STATUS_TOPICO.map(s => `<option value="${s}" ${t.status === s ? 'selected' : ''}>${STATUS_TOPICO_LABEL[s]}</option>`).join('')}
-      </select>
-      <div class="pct-bar-wrap mt-12">
-        <div class="pct-bar"><span style="width:${pct.toFixed(1)}%"></span></div>
-        <span class="num">${stats ? fmtPct(pct) : '-'}</span>
+      <div class="kanban-card-badges">
+        ${stats ? `<span class="kb-badge" title="Você já estudou este tópico"><svg viewBox="0 0 24 24" width="13" height="13"><path fill="currentColor" d="M12 5c-7 0-10 7-10 7s3 7 10 7 10-7 10-7-3-7-10-7zm0 11.5A4.5 4.5 0 1112 7.5a4.5 4.5 0 010 9zM12 10a2 2 0 100 4 2 2 0 000-4z"/></svg></span>` : ''}
+        <span class="kb-badge kb-badge-clicavel" data-expand-mi="${mi}" data-expand-ti="${ti}" title="Ver detalhes e mudar status">
+          <svg viewBox="0 0 24 24" width="13" height="13"><path fill="currentColor" d="M3 5h18v2H3zm0 6h18v2H3zm0 6h18v2H3z"/></svg>
+        </span>
+        ${stats ? `<span class="kb-badge" title="Tentativas registradas"><svg viewBox="0 0 24 24" width="13" height="13"><path fill="currentColor" d="M4 4h16v12H7l-3 3V4z"/></svg> ${stats.tentativas}</span>` : ''}
+        ${stats ? `<span class="kb-badge kb-badge-pct" title="Taxa de acertos">${fmtPct(pct)}</span>` : ''}
       </div>
-      ${stats ? `
-        <div class="kanban-card-stats">
-          <span>Melhor: <strong>${fmtPct(stats.melhor)}</strong></span>
-          <span>Última: <strong>${fmtPct(stats.ultima)}</strong></span>
-          <span>${stats.tentativas} tentativa(s)</span>
-          <span>${stats.questoes} questões</span>
-        </div>
-        <div class="kanban-card-foot">Última vez: ${toBRDate(stats.ultimaData)} ${stats.tendencia.icone}</div>
-      ` : `<div class="kanban-card-stats"><span class="text-muted">Nenhuma tentativa registrada ainda</span></div>`}
+      <div class="kanban-card-detalhe" id="kb-detalhe-${mi}-${ti}" hidden>
+        <select class="kanban-status-select" data-mi="${mi}" data-ti="${ti}">
+          ${STATUS_TOPICO.map(s => `<option value="${s}" ${t.status === s ? 'selected' : ''}>${STATUS_TOPICO_LABEL[s]}</option>`).join('')}
+        </select>
+        ${stats ? `
+          <div class="kanban-card-stats">
+            <span>Melhor: <strong>${fmtPct(stats.melhor)}</strong></span>
+            <span>Última: <strong>${fmtPct(stats.ultima)}</strong></span>
+            <span>${stats.questoes} questões</span>
+          </div>
+          <div class="kanban-card-foot">Última vez: ${toBRDate(stats.ultimaData)} ${stats.tendencia.icone}</div>
+        ` : `<div class="kanban-card-stats"><span class="text-muted">Nenhuma tentativa registrada ainda</span></div>`}
+      </div>
     </div>
   `;
 }

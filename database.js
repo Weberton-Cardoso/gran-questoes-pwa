@@ -1,8 +1,9 @@
 /**
  * database.js
  * Camada de acesso a dados usando IndexedDB.
- * Todas as entidades principais (tentativas, editais, simulados) ficam aqui.
- * Configurações pequenas (tema, sidebar) usam localStorage — ver app.js.
+ * Todas as entidades principais (tentativas, editais, simulados, ciclo de
+ * estudos) ficam aqui. Configurações pequenas (tema, sidebar, duração padrão
+ * da sessão do ciclo) usam localStorage — ver app.js.
  *
  * v2: o cadastro por questão individual ("questoes") foi substituído pelo
  * cadastro por TENTATIVA (bloco de questões de um mesmo assunto).
@@ -11,15 +12,21 @@
  *   nao_estudado -> nao_iniciado
  *   em_estudo    -> em_estudo (mantém)
  *   concluido    -> dominado
+ * v4: adiciona o Ciclo de Estudos (cicloMaterias + cicloSessoes).
+ * v5: adiciona cicloConfig (config única: tempo total do ciclo em minutos
+ *     e quantos ciclos completos já foram fechados).
  */
 
 const DB_NAME = 'TrilhaAprovacaoDB';
-const DB_VERSION = 3;
+const DB_VERSION = 5;
 
 const STORES = {
   tentativas: 'tentativas',
   editais: 'editais',
-  simulados: 'simulados'
+  simulados: 'simulados',
+  cicloMaterias: 'cicloMaterias',
+  cicloSessoes: 'cicloSessoes',
+  cicloConfig: 'cicloConfig'
 };
 
 const TIPOS_TENTATIVA = [
@@ -69,6 +76,19 @@ function openDB() {
       if (!db.objectStoreNames.contains(STORES.simulados)) {
         const store = db.createObjectStore(STORES.simulados, { keyPath: 'id', autoIncrement: true });
         store.createIndex('data', 'data', { unique: false });
+      }
+
+      if (!db.objectStoreNames.contains(STORES.cicloMaterias)) {
+        db.createObjectStore(STORES.cicloMaterias, { keyPath: 'id', autoIncrement: true });
+      }
+
+      if (!db.objectStoreNames.contains(STORES.cicloSessoes)) {
+        const store = db.createObjectStore(STORES.cicloSessoes, { keyPath: 'id', autoIncrement: true });
+        store.createIndex('data', 'data', { unique: false });
+      }
+
+      if (!db.objectStoreNames.contains(STORES.cicloConfig)) {
+        db.createObjectStore(STORES.cicloConfig, { keyPath: 'id' });
       }
 
       const jaTinhaQuestoes = db.objectStoreNames.contains('questoes');
@@ -210,17 +230,45 @@ const db = {
     clear: () => db.clear(STORES.simulados)
   },
 
+  cicloMaterias: {
+    add: (m) => db.add(STORES.cicloMaterias, m),
+    update: (m) => db.update(STORES.cicloMaterias, m),
+    remove: (id) => db.remove(STORES.cicloMaterias, id),
+    getAll: () => db.getAll(STORES.cicloMaterias),
+    clear: () => db.clear(STORES.cicloMaterias)
+  },
+
+  cicloSessoes: {
+    add: (s) => db.add(STORES.cicloSessoes, s),
+    update: (s) => db.update(STORES.cicloSessoes, s),
+    remove: (id) => db.remove(STORES.cicloSessoes, id),
+    getAll: () => db.getAll(STORES.cicloSessoes),
+    clear: () => db.clear(STORES.cicloSessoes)
+  },
+
+  // Config única do ciclo (id fixo = 1): tempo total do ciclo e nº de ciclos fechados.
+  cicloConfig: {
+    async get() {
+      const registro = await db.get(STORES.cicloConfig, 1);
+      return registro || { id: 1, minutosCicloTotal: 1200, ciclosCompletos: 0 };
+    },
+    set: (cfg) => db.update(STORES.cicloConfig, { ...cfg, id: 1 })
+  },
+
   // ---------- Backup ----------
   async exportAll() {
-    const [tentativas, editais, simulados] = await Promise.all([
+    const [tentativas, editais, simulados, cicloMaterias, cicloSessoes, cicloConfig] = await Promise.all([
       db.getAll(STORES.tentativas),
       db.getAll(STORES.editais),
-      db.getAll(STORES.simulados)
+      db.getAll(STORES.simulados),
+      db.getAll(STORES.cicloMaterias),
+      db.getAll(STORES.cicloSessoes),
+      db.cicloConfig.get()
     ]);
     return {
       versao: DB_VERSION,
       exportadoEm: new Date().toISOString(),
-      tentativas, editais, simulados
+      tentativas, editais, simulados, cicloMaterias, cicloSessoes, cicloConfig
     };
   },
 
@@ -229,7 +277,10 @@ const db = {
       await Promise.all([
         db.clear(STORES.tentativas),
         db.clear(STORES.editais),
-        db.clear(STORES.simulados)
+        db.clear(STORES.simulados),
+        db.clear(STORES.cicloMaterias),
+        db.clear(STORES.cicloSessoes),
+        db.clear(STORES.cicloConfig)
       ]);
     }
 
@@ -252,6 +303,8 @@ const db = {
 
     const listaEditais = Array.isArray(data.editais) ? data.editais : [];
     const listaSimulados = Array.isArray(data.simulados) ? data.simulados : [];
+    const listaCicloMaterias = Array.isArray(data.cicloMaterias) ? data.cicloMaterias : [];
+    const listaCicloSessoes = Array.isArray(data.cicloSessoes) ? data.cicloSessoes : [];
 
     for (const t of listaTentativas) {
       const { id, ...rest } = t;
@@ -265,13 +318,30 @@ const db = {
       const { id, ...rest } = s;
       await db.add(STORES.simulados, rest);
     }
+    for (const m of listaCicloMaterias) {
+      const { id, ...rest } = m;
+      await db.add(STORES.cicloMaterias, rest);
+    }
+    for (const s of listaCicloSessoes) {
+      const { id, ...rest } = s;
+      await db.add(STORES.cicloSessoes, rest);
+    }
+    if (data.cicloConfig) {
+      await db.cicloConfig.set({
+        minutosCicloTotal: data.cicloConfig.minutosCicloTotal ?? 1200,
+        ciclosCompletos: data.cicloConfig.ciclosCompletos ?? 0
+      });
+    }
   },
 
   async zerarTudo() {
     await Promise.all([
       db.clear(STORES.tentativas),
       db.clear(STORES.editais),
-      db.clear(STORES.simulados)
+      db.clear(STORES.simulados),
+      db.clear(STORES.cicloMaterias),
+      db.clear(STORES.cicloSessoes),
+      db.clear(STORES.cicloConfig)
     ]);
   }
 };

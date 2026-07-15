@@ -76,7 +76,18 @@ const settings = {
   get theme() { return localStorage.getItem('ta_theme') || 'dark'; },
   set theme(v) { localStorage.setItem('ta_theme', v); },
   get sidebarCollapsed() { return localStorage.getItem('ta_sidebar_collapsed') === '1'; },
-  set sidebarCollapsed(v) { localStorage.setItem('ta_sidebar_collapsed', v ? '1' : '0'); }
+  set sidebarCollapsed(v) { localStorage.setItem('ta_sidebar_collapsed', v ? '1' : '0'); },
+  // Sessão de estudo em andamento no Ciclo de Estudos: { materiaId, inicio (timestamp ms) } ou null.
+  // Fica em localStorage (não sincroniza entre dispositivos) porque é só o estado
+  // momentâneo do cronômetro deste aparelho — o tempo já concluído é salvo no banco.
+  get cicloSessaoAtiva() {
+    const raw = localStorage.getItem('ta_ciclo_sessao_ativa');
+    return raw ? JSON.parse(raw) : null;
+  },
+  set cicloSessaoAtiva(v) {
+    if (v) localStorage.setItem('ta_ciclo_sessao_ativa', JSON.stringify(v));
+    else localStorage.removeItem('ta_ciclo_sessao_ativa');
+  }
 };
 
 function applyTheme() {
@@ -91,13 +102,20 @@ const state = {
   tentativas: [],
   editais: [],
   simulados: [],
+  cicloMaterias: [],
+  cicloSessoes: [],
+  cicloConfig: { minutosCicloTotal: 1200, ciclosCompletos: 0 },
   dashboardFiltro: { tipo: '7d', inicio: null, fim: null }
 };
 
 async function reloadState() {
-  const [tentativas, editais, simulados] = await Promise.all([
-    db.tentativas.getAll(), db.editais.getAll(), db.simulados.getAll()
+  const [tentativas, editais, simulados, cicloMaterias, cicloSessoes, cicloConfig] = await Promise.all([
+    db.tentativas.getAll(), db.editais.getAll(), db.simulados.getAll(),
+    db.cicloMaterias.getAll(), db.cicloSessoes.getAll(), db.cicloConfig.get()
   ]);
+  state.cicloMaterias = cicloMaterias.sort((a, b) => a.ordem - b.ordem);
+  state.cicloSessoes = cicloSessoes;
+  state.cicloConfig = cicloConfig;
   state.tentativas = tentativas;
   state.editais = editais;
   state.simulados = simulados;
@@ -318,6 +336,7 @@ const PAGE_TITLES = {
   'dashboard': 'Dashboard',
   'tentativas': 'Tentativas',
   'importar-historico': 'Importar Histórico',
+  'ciclo': 'Ciclo de Estudos',
   'estatisticas/disciplinas': 'Estatísticas por Disciplina',
   'estatisticas/assuntos': 'Estatísticas por Assunto',
   'estatisticas/bancas': 'Estatísticas por Banca',
@@ -355,6 +374,10 @@ async function router() {
     $('#page-title').textContent = PAGE_TITLES['importar-historico'];
     updateActiveNav('importar-historico');
     renderImportarHistorico(view);
+  } else if (base === 'ciclo') {
+    $('#page-title').textContent = PAGE_TITLES['ciclo'];
+    updateActiveNav('ciclo');
+    renderCicloEstudos(view);
   } else if (base === 'estatisticas') {
     if (sub === 'disciplinas' && sub2) {
       $('#page-title').textContent = `Disciplina: ${decodeURIComponent(sub2)}`;
