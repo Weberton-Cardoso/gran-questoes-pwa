@@ -666,9 +666,7 @@ function renderTentativas(view) {
       <input type="text" class="search-input" id="busca-tentativas" placeholder="Pesquisar por disciplina, assunto, banca ou concurso..." value="${escapeHtml(_tentativasBusca)}">
       <button class="btn btn-primary" id="btn-nova-tentativa"><svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg> Registrar tentativa</button>
     </div>
-    <div class="card" style="padding:0;">
-      <div class="table-wrap" id="tabela-tentativas"></div>
-    </div>
+    <div id="lista-tentativas"></div>
   `;
 
   $('#btn-nova-tentativa').addEventListener('click', () => openTentativaModal());
@@ -689,7 +687,7 @@ function renderTentativas(view) {
       );
     }
 
-    const wrap = $('#tabela-tentativas');
+    const wrap = $('#lista-tentativas');
     if (!lista.length) {
       wrap.innerHTML = `<div class="empty-state">
         <p>Nenhuma tentativa registrada ainda.</p>
@@ -700,40 +698,41 @@ function renderTentativas(view) {
     }
 
     wrap.innerHTML = `
-      <table>
-        <thead>
-          <tr>
-            <th>Data</th><th>Disciplina</th><th>Assunto</th><th>Banca</th><th>Concurso</th>
-            <th>Tipo</th><th>Questões</th><th>Acertos</th><th>Erros</th><th>Taxa</th><th></th>
-          </tr>
-        </thead>
-        <tbody>
-          ${lista.map(t => `
-            <tr>
-              <td class="num">${toBRDate(t.data)}</td>
-              <td>${escapeHtml(t.disciplina) || '-'}</td>
-              <td>${escapeHtml(t.assunto) || '-'}</td>
-              <td>${escapeHtml(t.banca) || '-'}</td>
-              <td>${escapeHtml(t.concurso) || '-'}</td>
-              <td><span class="badge muted">${escapeHtml(t.tipo) || '-'}</span></td>
-              <td class="num">${t.numQuestoes}</td>
-              <td class="num" style="color:var(--success)">${t.acertos}</td>
-              <td class="num" style="color:var(--danger)">${t.erros}</td>
-              <td class="num">${fmtPct(t.taxa)}</td>
-              <td>
-                <div class="flex gap-8">
-                  <button class="icon-btn" data-edit="${t.id}" title="Editar">
-                    <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75zM20.71 7.04a1 1 0 000-1.41l-2.34-2.34a1 1 0 00-1.41 0l-1.83 1.83 3.75 3.75z"/></svg>
-                  </button>
-                  <button class="icon-btn" data-del="${t.id}" title="Excluir">
-                    <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M6 7h12l-1 14H7zM9 4h6l1 2H8zM9 10v8M12 10v8M15 10v8"/></svg>
-                  </button>
-                </div>
-              </td>
-            </tr>
-          `).join('')}
-        </tbody>
-      </table>
+      <div class="tentativas-lista">
+        ${lista.map(t => `
+          <div class="tentativa-card">
+            <div class="tentativa-card-topo">
+              <div>
+                <div class="tentativa-card-disciplina">${escapeHtml(t.disciplina) || '-'}</div>
+                <div class="tentativa-card-assunto">${escapeHtml(t.assunto) || '-'}</div>
+              </div>
+              <span class="badge muted">${escapeHtml(t.tipo) || '-'}</span>
+            </div>
+            <div class="tentativa-card-meta">
+              <span>${toBRDate(t.data)}</span>
+              ${t.banca ? `<span>${escapeHtml(t.banca)}</span>` : ''}
+              ${t.concurso ? `<span>${escapeHtml(t.concurso)}</span>` : ''}
+            </div>
+            <div class="tentativa-card-stats">
+              <span>${t.numQuestoes} questões</span>
+              <span style="color:var(--success)">${t.acertos} certas</span>
+              <span style="color:var(--danger)">${t.erros} erradas</span>
+              <span class="tentativa-card-taxa">${fmtPct(t.taxa)}</span>
+            </div>
+            ${t.observacoes ? `<div class="tentativa-card-obs">${escapeHtml(t.observacoes)}</div>` : ''}
+            <div class="tentativa-card-acoes">
+              <button class="btn btn-sm" data-edit="${t.id}">
+                <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75zM20.71 7.04a1 1 0 000-1.41l-2.34-2.34a1 1 0 00-1.41 0l-1.83 1.83 3.75 3.75z"/></svg>
+                Editar
+              </button>
+              <button class="btn btn-sm btn-ghost" data-del="${t.id}">
+                <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M6 7h12l-1 14H7zM9 4h6l1 2H8zM9 10v8M12 10v8M15 10v8"/></svg>
+                Excluir
+              </button>
+            </div>
+          </div>
+        `).join('')}
+      </div>
     `;
 
     $$('[data-edit]', wrap).forEach(btn => btn.addEventListener('click', () => {
