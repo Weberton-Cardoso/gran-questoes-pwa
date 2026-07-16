@@ -15,15 +15,20 @@
  * v4: adiciona o Ciclo de Estudos (cicloMaterias + cicloSessoes).
  * v5: adiciona cicloConfig (config única: tempo total do ciclo em minutos
  *     e quantos ciclos completos já foram fechados).
+ * v6: suporte a VÁRIOS ciclos nomeados. Cria o store "ciclos" (cada um com
+ *     nome, tempo total e contador de voltas fechadas) e cicloMaterias
+ *     passa a ter um campo cicloId apontando para o ciclo dono. O ciclo
+ *     único que já existia (cicloConfig, id fixo 1) vira "Ciclo 1".
  */
 
 const DB_NAME = 'TrilhaAprovacaoDB';
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 
 const STORES = {
   tentativas: 'tentativas',
   editais: 'editais',
   simulados: 'simulados',
+  ciclos: 'ciclos',
   cicloMaterias: 'cicloMaterias',
   cicloSessoes: 'cicloSessoes',
   cicloConfig: 'cicloConfig'
@@ -91,6 +96,13 @@ function openDB() {
         db.createObjectStore(STORES.cicloConfig, { keyPath: 'id' });
       }
 
+      let ciclosStore;
+      if (!db.objectStoreNames.contains(STORES.ciclos)) {
+        ciclosStore = db.createObjectStore(STORES.ciclos, { keyPath: 'id', autoIncrement: true });
+      } else {
+        ciclosStore = tx.objectStore(STORES.ciclos);
+      }
+
       const jaTinhaQuestoes = db.objectStoreNames.contains('questoes');
       let tentativasStore;
 
@@ -146,6 +158,37 @@ function openDB() {
           });
           cursor.update(edital);
           cursor.continue();
+        };
+      }
+
+      // Migração v6: o ciclo único antigo (cicloConfig, id fixo 1) + as
+      // cicloMaterias "soltas" (sem cicloId) viram um ciclo nomeado "Ciclo 1".
+      if (oldVersion > 0 && oldVersion < 6) {
+        const materiasStore = tx.objectStore(STORES.cicloMaterias);
+        const configStoreAntiga = tx.objectStore(STORES.cicloConfig);
+
+        materiasStore.getAll().onsuccess = (ev) => {
+          const materiasExistentes = (ev.target.result || []).filter(m => !m.cicloId);
+          if (!materiasExistentes.length) return;
+
+          const criarCicloEMigrar = (cfgAntiga) => {
+            const novoCiclo = {
+              nome: 'Ciclo 1',
+              minutosCicloTotal: (cfgAntiga && cfgAntiga.minutosCicloTotal) || 1200,
+              ciclosCompletos: (cfgAntiga && cfgAntiga.ciclosCompletos) || 0,
+              ordem: 0
+            };
+            const reqAdd = ciclosStore.add(novoCiclo);
+            reqAdd.onsuccess = () => {
+              const novoCicloId = reqAdd.result;
+              materiasExistentes.forEach(m => {
+                m.cicloId = novoCicloId;
+                materiasStore.put(m);
+              });
+            };
+          };
+
+          configStoreAntiga.get(1).onsuccess = (ev2) => criarCicloEMigrar(ev2.target.result);
         };
       }
     };
@@ -230,6 +273,14 @@ const db = {
     clear: () => db.clear(STORES.simulados)
   },
 
+  ciclos: {
+    add: (c) => db.add(STORES.ciclos, c),
+    update: (c) => db.update(STORES.ciclos, c),
+    remove: (id) => db.remove(STORES.ciclos, id),
+    getAll: () => db.getAll(STORES.ciclos),
+    clear: () => db.clear(STORES.ciclos)
+  },
+
   cicloMaterias: {
     add: (m) => db.add(STORES.cicloMaterias, m),
     update: (m) => db.update(STORES.cicloMaterias, m),
@@ -246,29 +297,20 @@ const db = {
     clear: () => db.clear(STORES.cicloSessoes)
   },
 
-  // Config única do ciclo (id fixo = 1): tempo total do ciclo e nº de ciclos fechados.
-  cicloConfig: {
-    async get() {
-      const registro = await db.get(STORES.cicloConfig, 1);
-      return registro || { id: 1, minutosCicloTotal: 1200, ciclosCompletos: 0 };
-    },
-    set: (cfg) => db.update(STORES.cicloConfig, { ...cfg, id: 1 })
-  },
-
   // ---------- Backup ----------
   async exportAll() {
-    const [tentativas, editais, simulados, cicloMaterias, cicloSessoes, cicloConfig] = await Promise.all([
+    const [tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes] = await Promise.all([
       db.getAll(STORES.tentativas),
       db.getAll(STORES.editais),
       db.getAll(STORES.simulados),
+      db.getAll(STORES.ciclos),
       db.getAll(STORES.cicloMaterias),
-      db.getAll(STORES.cicloSessoes),
-      db.cicloConfig.get()
+      db.getAll(STORES.cicloSessoes)
     ]);
     return {
       versao: DB_VERSION,
       exportadoEm: new Date().toISOString(),
-      tentativas, editais, simulados, cicloMaterias, cicloSessoes, cicloConfig
+      tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes
     };
   },
 
@@ -278,6 +320,7 @@ const db = {
         db.clear(STORES.tentativas),
         db.clear(STORES.editais),
         db.clear(STORES.simulados),
+        db.clear(STORES.ciclos),
         db.clear(STORES.cicloMaterias),
         db.clear(STORES.cicloSessoes),
         db.clear(STORES.cicloConfig)
@@ -303,6 +346,7 @@ const db = {
 
     const listaEditais = Array.isArray(data.editais) ? data.editais : [];
     const listaSimulados = Array.isArray(data.simulados) ? data.simulados : [];
+    const listaCiclos = Array.isArray(data.ciclos) ? data.ciclos : [];
     const listaCicloMaterias = Array.isArray(data.cicloMaterias) ? data.cicloMaterias : [];
     const listaCicloSessoes = Array.isArray(data.cicloSessoes) ? data.cicloSessoes : [];
 
@@ -318,19 +362,36 @@ const db = {
       const { id, ...rest } = s;
       await db.add(STORES.simulados, rest);
     }
+
+    // Mapa do id antigo do ciclo -> novo id gerado (os ids mudam ao reimportar)
+    const mapaCicloId = {};
+    for (const c of listaCiclos) {
+      const { id, ...rest } = c;
+      const novoId = await db.add(STORES.ciclos, rest);
+      if (id != null) mapaCicloId[id] = novoId;
+    }
+
+    // Compatível com backup antigo (ciclo único, sem "ciclos" nem cicloId nas matérias)
+    let cicloUnicoIdAntigo = null;
+    if (!listaCiclos.length && listaCicloMaterias.length && data.cicloConfig) {
+      cicloUnicoIdAntigo = await db.add(STORES.ciclos, {
+        nome: 'Ciclo 1',
+        minutosCicloTotal: data.cicloConfig.minutosCicloTotal ?? 1200,
+        ciclosCompletos: data.cicloConfig.ciclosCompletos ?? 0,
+        ordem: 0
+      });
+    }
+
     for (const m of listaCicloMaterias) {
-      const { id, ...rest } = m;
+      const { id, cicloId, ...rest } = m;
+      rest.cicloId = cicloId != null && mapaCicloId[cicloId] != null
+        ? mapaCicloId[cicloId]
+        : (cicloUnicoIdAntigo ?? cicloId);
       await db.add(STORES.cicloMaterias, rest);
     }
     for (const s of listaCicloSessoes) {
       const { id, ...rest } = s;
       await db.add(STORES.cicloSessoes, rest);
-    }
-    if (data.cicloConfig) {
-      await db.cicloConfig.set({
-        minutosCicloTotal: data.cicloConfig.minutosCicloTotal ?? 1200,
-        ciclosCompletos: data.cicloConfig.ciclosCompletos ?? 0
-      });
     }
   },
 
@@ -339,6 +400,7 @@ const db = {
       db.clear(STORES.tentativas),
       db.clear(STORES.editais),
       db.clear(STORES.simulados),
+      db.clear(STORES.ciclos),
       db.clear(STORES.cicloMaterias),
       db.clear(STORES.cicloSessoes),
       db.clear(STORES.cicloConfig)

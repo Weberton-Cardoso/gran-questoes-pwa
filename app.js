@@ -102,20 +102,20 @@ const state = {
   tentativas: [],
   editais: [],
   simulados: [],
+  ciclos: [],
   cicloMaterias: [],
   cicloSessoes: [],
-  cicloConfig: { minutosCicloTotal: 1200, ciclosCompletos: 0 },
   dashboardFiltro: { tipo: '7d', inicio: null, fim: null }
 };
 
 async function reloadState() {
-  const [tentativas, editais, simulados, cicloMaterias, cicloSessoes, cicloConfig] = await Promise.all([
+  const [tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes] = await Promise.all([
     db.tentativas.getAll(), db.editais.getAll(), db.simulados.getAll(),
-    db.cicloMaterias.getAll(), db.cicloSessoes.getAll(), db.cicloConfig.get()
+    db.ciclos.getAll(), db.cicloMaterias.getAll(), db.cicloSessoes.getAll()
   ]);
+  state.ciclos = ciclos.sort((a, b) => a.ordem - b.ordem);
   state.cicloMaterias = cicloMaterias.sort((a, b) => a.ordem - b.ordem);
   state.cicloSessoes = cicloSessoes;
-  state.cicloConfig = cicloConfig;
   state.tentativas = tentativas;
   state.editais = editais;
   state.simulados = simulados;
@@ -375,9 +375,17 @@ async function router() {
     updateActiveNav('importar-historico');
     renderImportarHistorico(view);
   } else if (base === 'ciclo') {
-    $('#page-title').textContent = PAGE_TITLES['ciclo'];
-    updateActiveNav('ciclo');
-    renderCicloEstudos(view);
+    if (sub) {
+      const cicloId = Number(sub);
+      const ciclo = state.ciclos.find(c => c.id === cicloId);
+      $('#page-title').textContent = ciclo ? ciclo.nome : PAGE_TITLES['ciclo'];
+      updateActiveNav('ciclo');
+      renderCicloPainelRoute(view, cicloId);
+    } else {
+      $('#page-title').textContent = PAGE_TITLES['ciclo'];
+      updateActiveNav('ciclo');
+      renderCiclosLista(view);
+    }
   } else if (base === 'estatisticas') {
     if (sub === 'disciplinas' && sub2) {
       $('#page-title').textContent = `Disciplina: ${decodeURIComponent(sub2)}`;

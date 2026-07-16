@@ -6,9 +6,12 @@
  * Você vai estudando (cronômetro) até bater a meta de cada disciplina;
  * quando todas terminam, fecha-se o ciclo (uma "volta") e tudo recomeça.
  *
- * Dados: db.cicloMaterias (disciplinas do ciclo + progresso da volta atual),
- * db.cicloSessoes (histórico de sessões estudadas) e db.cicloConfig
- * (tempo total do ciclo + contador de ciclos fechados).
+ * Suporta VÁRIOS ciclos nomeados ao mesmo tempo (ex.: um ciclo "TCDF" com
+ * até 5 disciplinas e outro "Português avulso" separado).
+ *
+ * Dados: db.ciclos (cada ciclo: nome, tempo total, voltas fechadas),
+ * db.cicloMaterias (disciplinas de um ciclo, via cicloId, + progresso da
+ * volta atual) e db.cicloSessoes (histórico de sessões estudadas).
  */
 
 let _cicloTimerInterval = null;
@@ -29,38 +32,125 @@ function _formatarCronometro(segundosTotais) {
   return h > 0 ? `${pad(h)}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
 }
 
-function _cicloSomaPesos() {
-  return state.cicloMaterias.reduce((s, m) => s + m.peso, 0) || 1;
+function _materiasDoCiclo(cicloId) {
+  return state.cicloMaterias.filter(m => m.cicloId === cicloId);
 }
 
-function _cicloMetaMinutos(materia) {
-  return Math.round((materia.peso / _cicloSomaPesos()) * state.cicloConfig.minutosCicloTotal);
+function _cicloSomaPesos(materias) {
+  return materias.reduce((s, m) => s + m.peso, 0) || 1;
 }
 
-/* ---- Ponto de entrada da rota #/ciclo ---- */
-function renderCicloEstudos(view) {
+function _cicloMetaMinutos(materia, materiasDoCiclo, minutosCicloTotal) {
+  return Math.round((materia.peso / _cicloSomaPesos(materiasDoCiclo)) * minutosCicloTotal);
+}
+
+/* ---- Lista de todos os ciclos (#/ciclo) ---- */
+function renderCiclosLista(view) {
   clearInterval(_cicloTimerInterval);
-  if (!state.cicloMaterias.length) {
-    renderCicloSetup(view, null);
-  } else {
-    renderCicloPainel(view);
+
+  const sessaoAtiva = settings.cicloSessaoAtiva;
+  let bannerSessao = '';
+  if (sessaoAtiva) {
+    const materia = state.cicloMaterias.find(m => m.id === sessaoAtiva.materiaId);
+    const ciclo = materia ? state.ciclos.find(c => c.id === materia.cicloId) : null;
+    if (materia && ciclo) {
+      bannerSessao = `
+        <div class="card mb-16 ciclo-sessao-ativa" style="cursor:pointer;" id="banner-sessao-ativa">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+            <div>
+              <div class="card-title" style="margin-bottom:2px;">Sessão em andamento</div>
+              <span class="text-muted" style="font-size:13px;">${escapeHtml(ciclo.nome)} · ${escapeHtml(materia.nome)}</span>
+            </div>
+            <span class="btn btn-sm btn-primary">Voltar</span>
+          </div>
+        </div>
+      `;
+    }
   }
+
+  const cards = state.ciclos.map(ciclo => {
+    const materias = _materiasDoCiclo(ciclo.id);
+    const totalFeito = materias.reduce((s, m) => s + m.minutosFeitos, 0);
+    const pct = ciclo.minutosCicloTotal ? Math.min(100, (totalFeito / ciclo.minutosCicloTotal) * 100) : 0;
+    return `
+      <div class="card ciclo-card-lista" data-abrir-ciclo="${ciclo.id}">
+        <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px;">
+          <div>
+            <div class="card-title" style="margin-bottom:2px;">${escapeHtml(ciclo.nome)}</div>
+            <span class="text-muted" style="font-size:12.5px;">
+              ${materias.length} disciplina${materias.length === 1 ? '' : 's'} · Ciclos completos: ${ciclo.ciclosCompletos}
+            </span>
+          </div>
+          <button class="btn btn-sm btn-ghost" data-editar-ciclo="${ciclo.id}" title="Editar disciplinas">Editar</button>
+        </div>
+        <div class="pct-bar-wrap mt-12" style="min-width:auto;">
+          <div class="pct-bar" style="flex:1;"><span style="width:${pct}%"></span></div>
+          <span class="num">${fmtPct(pct)}</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  view.innerHTML = `
+    ${bannerSessao}
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+      <span class="text-muted" style="font-size:13.5px;">Você pode manter vários ciclos separados (ex.: um por concurso ou bloco de disciplinas).</span>
+      <button class="btn btn-primary btn-sm" id="btn-novo-ciclo">+ Novo ciclo</button>
+    </div>
+    ${state.ciclos.length ? `<div class="ciclos-grid">${cards}</div>` : `
+      <div class="empty-state">
+        <p>Você ainda não criou nenhum ciclo de estudos.</p>
+      </div>
+    `}
+  `;
+
+  if (sessaoAtiva) {
+    const btnBanner = $('#banner-sessao-ativa');
+    if (btnBanner) {
+      const materia = state.cicloMaterias.find(m => m.id === sessaoAtiva.materiaId);
+      btnBanner.addEventListener('click', () => { location.hash = `#/ciclo/${materia.cicloId}`; });
+    }
+  }
+
+  $('#btn-novo-ciclo').addEventListener('click', () => renderCicloSetup(view, null));
+
+  $$('[data-abrir-ciclo]', view).forEach(card => {
+    card.addEventListener('click', (e) => {
+      if (e.target.closest('[data-editar-ciclo]')) return;
+      location.hash = `#/ciclo/${card.dataset.abrirCiclo}`;
+    });
+  });
+
+  $$('[data-editar-ciclo]', view).forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const ciclo = state.ciclos.find(c => c.id === Number(btn.dataset.editarCiclo));
+      if (ciclo) renderCicloSetup(view, ciclo);
+    });
+  });
 }
 
-/* ---- Tela de configuração (criação ou edição do ciclo) ---- */
-function renderCicloSetup(view, prefill) {
+/* ---- Tela de configuração (criação ou edição de UM ciclo) ---- */
+function renderCicloSetup(view, cicloExistente) {
   clearInterval(_cicloTimerInterval);
-  const linhasIniciais = prefill
-    ? prefill.materias.map(m => `${m.nome}: ${m.peso}`).join('\n')
+  const materiasExistentes = cicloExistente ? _materiasDoCiclo(cicloExistente.id) : [];
+  const linhasIniciais = cicloExistente
+    ? materiasExistentes.map(m => `${m.nome}: ${m.peso}`).join('\n')
     : '';
-  const horasIniciais = prefill ? (prefill.minutosCicloTotal / 60) : 20;
+  const nomeInicial = cicloExistente ? cicloExistente.nome : '';
+  const horasIniciais = cicloExistente ? (cicloExistente.minutosCicloTotal / 60) : 20;
 
   view.innerHTML = `
     <div class="card">
-      <div class="card-title">${prefill ? 'Editar ciclo de estudos' : 'Monte seu ciclo de estudos'}</div>
+      <div class="card-title">${cicloExistente ? 'Editar ciclo' : 'Novo ciclo de estudos'}</div>
+      <div class="form-row">
+        <label>Nome do ciclo</label>
+        <input type="text" id="ciclo-nome" placeholder="Ex: TCDF, Português avulso, Bloco de exatas..." value="${escapeHtml(nomeInicial)}">
+      </div>
       <p class="text-muted" style="font-size:13.5px;">
-        Liste as disciplinas do seu ciclo, uma por linha, com o peso (prioridade) depois de dois-pontos.
+        Liste as disciplinas deste ciclo, uma por linha, com o peso (prioridade) depois de dois-pontos.
         Disciplinas com peso maior recebem mais tempo dentro do ciclo. Se não informar o peso, o padrão é 1.
+        <br><em>Dica: muita gente prefere manter até 5 disciplinas por ciclo — mas fique à vontade.</em>
       </p>
       <pre style="font-size:12.5px;background:var(--surface-2);padding:8px 10px;border-radius:8px;overflow-x:auto;margin:0 0 14px;">Direito Constitucional: 5
 Direito Administrativo: 5
@@ -74,14 +164,37 @@ Raciocínio Lógico: 2</pre>
         <label>Tempo total do ciclo (em horas)</label>
         <input type="number" id="ciclo-horas" min="1" step="0.5" value="${horasIniciais}">
       </div>
-      <div style="display:flex; gap:10px;">
-        <button class="btn btn-primary" id="btn-salvar-ciclo">${prefill ? 'Salvar alterações' : 'Criar ciclo de estudos'}</button>
-        ${prefill ? '<button class="btn btn-ghost" id="btn-cancelar-edicao-ciclo">Cancelar</button>' : ''}
+      <div style="display:flex; gap:10px; flex-wrap:wrap;">
+        <button class="btn btn-primary" id="btn-salvar-ciclo">${cicloExistente ? 'Salvar alterações' : 'Criar ciclo'}</button>
+        <button class="btn btn-ghost" id="btn-cancelar-edicao-ciclo">Cancelar</button>
+        ${cicloExistente ? '<button class="btn btn-danger" id="btn-excluir-ciclo-setup" style="margin-left:auto;">Excluir este ciclo</button>' : ''}
       </div>
     </div>
   `;
 
+  $('#btn-cancelar-edicao-ciclo').addEventListener('click', () => {
+    if (cicloExistente) location.hash = `#/ciclo/${cicloExistente.id}`;
+    else renderCiclosLista(view);
+  });
+
+  if (cicloExistente) {
+    $('#btn-excluir-ciclo-setup').addEventListener('click', async () => {
+      if (!confirm(`Excluir o ciclo "${cicloExistente.nome}" e todo o seu progresso? As tentativas registradas nas Estatísticas não são afetadas.`)) return;
+      for (const m of materiasExistentes) await db.cicloMaterias.remove(m.id);
+      await db.ciclos.remove(cicloExistente.id);
+      const sessaoAtiva = settings.cicloSessaoAtiva;
+      if (sessaoAtiva && materiasExistentes.some(m => m.id === sessaoAtiva.materiaId)) {
+        settings.cicloSessaoAtiva = null;
+      }
+      await reloadState();
+      location.hash = '#/ciclo';
+    });
+  }
+
   $('#btn-salvar-ciclo').addEventListener('click', async () => {
+    const nome = $('#ciclo-nome').value.trim();
+    if (!nome) { showToast('Dê um nome para o ciclo.', 'error'); return; }
+
     const texto = $('#ciclo-texto').value;
     const horas = Number($('#ciclo-horas').value) || 20;
     const linhas = texto.split('\n').map(l => l.trim()).filter(Boolean);
@@ -89,70 +202,82 @@ Raciocínio Lógico: 2</pre>
 
     const novasMaterias = linhas.map(linha => {
       const m = linha.match(/^(.+?)(?::\s*([\d.,]+))?$/);
-      const nome = (m ? m[1] : linha).trim();
+      const nomeM = (m ? m[1] : linha).trim();
       const pesoStr = m && m[2] ? m[2].replace(',', '.') : '1';
       const peso = Number(pesoStr);
-      return { nome, peso: peso > 0 ? peso : 1 };
+      return { nome: nomeM, peso: peso > 0 ? peso : 1 };
     }).filter(m => m.nome);
 
-    if (prefill) {
-      const antigas = prefill.materias;
+    if (novasMaterias.length > 5) {
+      showToast('Ciclo salvo com mais de 5 disciplinas — sem problema, é só um lembrete do seu costume.', '');
+    }
+
+    let cicloId;
+    if (cicloExistente) {
+      cicloId = cicloExistente.id;
+      await db.ciclos.update({ ...cicloExistente, nome, minutosCicloTotal: Math.round(horas * 60) });
+
       const restantes = [];
       for (const nova of novasMaterias) {
-        const antiga = antigas.find(a => _norm(a.nome) === _norm(nova.nome));
-        restantes.push(antiga ? { ...antiga, nome: nova.nome, peso: nova.peso } : { nome: nova.nome, peso: nova.peso, minutosFeitos: 0 });
+        const antiga = materiasExistentes.find(a => _norm(a.nome) === _norm(nova.nome));
+        restantes.push(antiga ? { ...antiga, nome: nova.nome, peso: nova.peso } : { nome: nova.nome, peso: nova.peso, minutosFeitos: 0, cicloId });
       }
-      for (const antiga of antigas) {
+      for (const antiga of materiasExistentes) {
         if (!novasMaterias.some(n => _norm(n.nome) === _norm(antiga.nome))) {
           await db.cicloMaterias.remove(antiga.id);
         }
       }
       for (let i = 0; i < restantes.length; i++) {
-        const mat = { ...restantes[i], ordem: i };
+        const mat = { ...restantes[i], cicloId, ordem: i };
         if (mat.id) await db.cicloMaterias.update(mat);
         else await db.cicloMaterias.add(mat);
       }
-      await db.cicloConfig.set({ minutosCicloTotal: Math.round(horas * 60), ciclosCompletos: prefill.ciclosCompletos });
     } else {
+      cicloId = await db.ciclos.add({
+        nome, minutosCicloTotal: Math.round(horas * 60), ciclosCompletos: 0, ordem: state.ciclos.length
+      });
       for (let i = 0; i < novasMaterias.length; i++) {
-        await db.cicloMaterias.add({ ...novasMaterias[i], ordem: i, minutosFeitos: 0 });
+        await db.cicloMaterias.add({ ...novasMaterias[i], cicloId, ordem: i, minutosFeitos: 0 });
       }
-      await db.cicloConfig.set({ minutosCicloTotal: Math.round(horas * 60), ciclosCompletos: 0 });
     }
 
     await reloadState();
     showToast('Ciclo de estudos salvo!', 'success');
-    renderCicloEstudos(view);
+    location.hash = `#/ciclo/${cicloId}`;
   });
-
-  if (prefill) {
-    $('#btn-cancelar-edicao-ciclo').addEventListener('click', () => renderCicloEstudos(view));
-  }
 }
 
-/* ---- Painel principal (ciclo já configurado) ---- */
-function renderCicloPainel(view) {
+/* ---- Painel de UM ciclo específico (#/ciclo/<id>) ---- */
+function renderCicloPainelRoute(view, cicloId) {
   clearInterval(_cicloTimerInterval);
 
-  const materias = state.cicloMaterias;
+  const ciclo = state.ciclos.find(c => c.id === cicloId);
+  if (!ciclo) {
+    view.innerHTML = '<div class="empty-state"><p>Ciclo não encontrado. <a href="#/ciclo">Voltar para a lista</a>.</p></div>';
+    return;
+  }
+
+  const materias = _materiasDoCiclo(cicloId).sort((a, b) => a.ordem - b.ordem);
   const totalFeito = materias.reduce((s, m) => s + m.minutosFeitos, 0);
-  const totalMeta = state.cicloConfig.minutosCicloTotal;
+  const totalMeta = ciclo.minutosCicloTotal;
   const pctGeral = totalMeta ? Math.min(100, (totalFeito / totalMeta) * 100) : 0;
-  const todasConcluidas = materias.every(m => m.minutosFeitos >= _cicloMetaMinutos(m) - 0.5);
+  const todasConcluidas = materias.length > 0 && materias.every(m => m.minutosFeitos >= _cicloMetaMinutos(m, materias, totalMeta) - 0.5);
   const sessaoAtiva = settings.cicloSessaoAtiva;
+  const sessaoAtivaEhDesteCiclo = sessaoAtiva && materias.some(m => m.id === sessaoAtiva.materiaId);
 
   view.innerHTML = `
+    <a href="#/ciclo" class="text-muted" style="font-size:13px; display:inline-block; margin-bottom:12px;">&larr; Todos os ciclos</a>
+
     <div class="card mb-16">
       <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
         <div>
-          <div class="card-title" style="margin-bottom:4px;">Progresso do ciclo</div>
+          <div class="card-title" style="margin-bottom:4px;">${escapeHtml(ciclo.nome)}</div>
           <span class="text-muted" style="font-size:13px;">
-            ${_formatarMinutos(totalFeito)} de ${_formatarMinutos(totalMeta)} · Ciclos completos: <strong>${state.cicloConfig.ciclosCompletos}</strong>
+            ${_formatarMinutos(totalFeito)} de ${_formatarMinutos(totalMeta)} · Ciclos completos: <strong>${ciclo.ciclosCompletos}</strong>
           </span>
         </div>
         <div style="display:flex; gap:8px;">
           <button class="btn btn-sm" id="btn-editar-ciclo">Editar disciplinas</button>
-          <button class="btn btn-sm btn-ghost" id="btn-excluir-ciclo">Excluir ciclo</button>
         </div>
       </div>
       <div class="pct-bar-wrap mt-12" style="min-width:auto;">
@@ -162,60 +287,44 @@ function renderCicloPainel(view) {
       ${todasConcluidas ? `<button class="btn btn-primary mt-12" id="btn-fechar-ciclo">🎉 Fechar ciclo e começar nova volta</button>` : ''}
     </div>
 
-    ${sessaoAtiva ? _renderCicloSessaoAtivaCard(sessaoAtiva) : ''}
+    ${sessaoAtivaEhDesteCiclo ? _renderCicloSessaoAtivaCard(sessaoAtiva) : ''}
 
     <div class="card">
-      <div class="card-title">Disciplinas do ciclo</div>
+      <div class="card-title">Disciplinas deste ciclo</div>
       <div class="ciclo-lista mt-12">
-        ${materias.map(m => _renderCicloLinhaMateria(m, sessaoAtiva)).join('')}
+        ${materias.map(m => _renderCicloLinhaMateria(m, materias, totalMeta, sessaoAtiva)).join('')}
       </div>
     </div>
   `;
 
-  $('#btn-editar-ciclo').addEventListener('click', () => {
-    renderCicloSetup(view, {
-      materias: state.cicloMaterias,
-      minutosCicloTotal: state.cicloConfig.minutosCicloTotal,
-      ciclosCompletos: state.cicloConfig.ciclosCompletos
-    });
-  });
-
-  $('#btn-excluir-ciclo').addEventListener('click', async () => {
-    if (!confirm('Excluir todo o ciclo de estudos (disciplinas, pesos e progresso)? As tentativas registradas nas Estatísticas não são afetadas.')) return;
-    for (const m of state.cicloMaterias) await db.cicloMaterias.remove(m.id);
-    for (const s of state.cicloSessoes) await db.cicloSessoes.remove(s.id);
-    await db.cicloConfig.set({ minutosCicloTotal: 1200, ciclosCompletos: 0 });
-    settings.cicloSessaoAtiva = null;
-    await reloadState();
-    renderCicloEstudos(view);
-  });
+  $('#btn-editar-ciclo').addEventListener('click', () => renderCicloSetup(view, ciclo));
 
   const btnFechar = $('#btn-fechar-ciclo');
   if (btnFechar) {
     btnFechar.addEventListener('click', async () => {
       if (!confirm('Fechar este ciclo e começar uma nova volta? O progresso de cada disciplina será zerado (o histórico de sessões estudadas é mantido).')) return;
-      for (const m of state.cicloMaterias) {
+      for (const m of materias) {
         m.minutosFeitos = 0;
         await db.cicloMaterias.update(m);
       }
-      await db.cicloConfig.set({ ...state.cicloConfig, ciclosCompletos: state.cicloConfig.ciclosCompletos + 1 });
+      await db.ciclos.update({ ...ciclo, ciclosCompletos: ciclo.ciclosCompletos + 1 });
       await reloadState();
       showToast('Ciclo concluído! Nova volta iniciada. 🎉', 'success');
-      renderCicloEstudos(view);
+      renderCicloPainelRoute(view, cicloId);
     });
   }
 
-  if (sessaoAtiva) {
+  if (sessaoAtivaEhDesteCiclo) {
     _iniciarCronometroVisual();
-    $('#btn-concluir-sessao').addEventListener('click', () => _concluirSessaoCiclo(view));
-    $('#btn-cancelar-sessao').addEventListener('click', () => _cancelarSessaoCiclo(view));
+    $('#btn-concluir-sessao').addEventListener('click', () => _concluirSessaoCiclo(view, cicloId));
+    $('#btn-cancelar-sessao').addEventListener('click', () => _cancelarSessaoCiclo(view, cicloId));
   }
 
   $$('[data-iniciar]', view).forEach(btn => {
     btn.addEventListener('click', () => {
       if (settings.cicloSessaoAtiva) { showToast('Finalize a sessão atual antes de iniciar outra.', 'error'); return; }
       settings.cicloSessaoAtiva = { materiaId: Number(btn.dataset.iniciar), inicio: Date.now() };
-      renderCicloEstudos(view);
+      renderCicloPainelRoute(view, cicloId);
     });
   });
 
@@ -233,7 +342,7 @@ function renderCicloPainel(view) {
       });
       await reloadState();
       showToast(`+${_formatarMinutos(minutos)} em ${materia.nome}`, 'success');
-      renderCicloEstudos(view);
+      renderCicloPainelRoute(view, cicloId);
     });
   });
 }
@@ -253,8 +362,8 @@ function _renderCicloSessaoAtivaCard(sessaoAtiva) {
   `;
 }
 
-function _renderCicloLinhaMateria(m, sessaoAtiva) {
-  const meta = _cicloMetaMinutos(m);
+function _renderCicloLinhaMateria(m, materiasDoCiclo, minutosCicloTotal, sessaoAtiva) {
+  const meta = _cicloMetaMinutos(m, materiasDoCiclo, minutosCicloTotal);
   const pct = meta ? Math.min(100, (m.minutosFeitos / meta) * 100) : 0;
   const concluida = meta > 0 && m.minutosFeitos >= meta;
   const emAndamento = sessaoAtiva && sessaoAtiva.materiaId === m.id;
@@ -292,7 +401,7 @@ function _iniciarCronometroVisual() {
   _cicloTimerInterval = setInterval(tick, 1000);
 }
 
-async function _concluirSessaoCiclo(view) {
+async function _concluirSessaoCiclo(view, cicloId) {
   const sessaoAtiva = settings.cicloSessaoAtiva;
   if (!sessaoAtiva) return;
   clearInterval(_cicloTimerInterval);
@@ -309,12 +418,12 @@ async function _concluirSessaoCiclo(view) {
   settings.cicloSessaoAtiva = null;
   await reloadState();
   showToast(`Sessão registrada: ${_formatarMinutos(minutos)}`, 'success');
-  renderCicloEstudos(view);
+  renderCicloPainelRoute(view, cicloId);
 }
 
-function _cancelarSessaoCiclo(view) {
+function _cancelarSessaoCiclo(view, cicloId) {
   if (!confirm('Cancelar esta sessão sem salvar o tempo estudado?')) return;
   clearInterval(_cicloTimerInterval);
   settings.cicloSessaoAtiva = null;
-  renderCicloEstudos(view);
+  renderCicloPainelRoute(view, cicloId);
 }
