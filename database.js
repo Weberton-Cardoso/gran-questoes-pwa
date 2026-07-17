@@ -19,10 +19,17 @@
  *     nome, tempo total e contador de voltas fechadas) e cicloMaterias
  *     passa a ter um campo cicloId apontando para o ciclo dono. O ciclo
  *     único que já existia (cicloConfig, id fixo 1) vira "Ciclo 1".
+ * v7: adiciona PERFIS DE ESTATÍSTICAS. Cria o store "perfis" (cada um com
+ *     nome) e os stores com dado do usuário (tentativas, editais,
+ *     simulados, ciclos, cicloMaterias, cicloSessoes) passam a ter um
+ *     campo perfilId. Tudo que já existia é migrado para um perfil padrão
+ *     chamado "Histórico Geral". db.getAll/db.add/db.clear desses stores
+ *     agora filtram/marcam automaticamente pelo perfil ativo
+ *     (db.perfilAtivoId) — o resto do app não precisa se preocupar com isso.
  */
 
 const DB_NAME = 'TrilhaAprovacaoDB';
-const DB_VERSION = 6;
+const DB_VERSION = 7;
 
 const STORES = {
   tentativas: 'tentativas',
@@ -31,8 +38,16 @@ const STORES = {
   ciclos: 'ciclos',
   cicloMaterias: 'cicloMaterias',
   cicloSessoes: 'cicloSessoes',
-  cicloConfig: 'cicloConfig'
+  cicloConfig: 'cicloConfig',
+  perfis: 'perfis'
 };
+
+/** Stores que pertencem a um perfil de estatísticas específico — getAll/add/clear
+ *  destes stores são automaticamente filtrados/marcados pelo perfil ativo. */
+const PERFIL_SCOPED_STORES = new Set([
+  STORES.tentativas, STORES.editais, STORES.simulados,
+  STORES.ciclos, STORES.cicloMaterias, STORES.cicloSessoes
+]);
 
 const TIPOS_TENTATIVA = [
   'Primeiro estudo',
@@ -191,6 +206,38 @@ function openDB() {
           configStoreAntiga.get(1).onsuccess = (ev2) => criarCicloEMigrar(ev2.target.result);
         };
       }
+
+      // v7: cria o store de perfis. Se ele ainda não existia, este banco tem
+      // dados "soltos" (sem perfilId) — cria o perfil padrão "Histórico Geral"
+      // e marca tudo que já existe com ele.
+      const perfisJaExistia = db.objectStoreNames.contains(STORES.perfis);
+      let perfisStore;
+      if (!perfisJaExistia) {
+        perfisStore = db.createObjectStore(STORES.perfis, { keyPath: 'id', autoIncrement: true });
+      } else {
+        perfisStore = tx.objectStore(STORES.perfis);
+      }
+
+      if (!perfisJaExistia) {
+        const reqPerfil = perfisStore.add({ nome: 'Histórico Geral', ordem: 0, criadoEm: new Date().toISOString() });
+        reqPerfil.onsuccess = () => {
+          const perfilPadraoId = reqPerfil.result;
+          Array.from(PERFIL_SCOPED_STORES).forEach(storeName => {
+            if (!db.objectStoreNames.contains(storeName)) return;
+            const store = tx.objectStore(storeName);
+            store.openCursor().onsuccess = (ev) => {
+              const cursor = ev.target.result;
+              if (!cursor) return;
+              const item = cursor.value;
+              if (item.perfilId == null) {
+                item.perfilId = perfilPadraoId;
+                cursor.update(item);
+              }
+              cursor.continue();
+            };
+          });
+        };
+      }
     };
 
     req.onsuccess = (event) => resolve(event.target.result);
@@ -222,8 +269,22 @@ async function tx(storeName, mode, fn) {
 
 const db = {
 
+  // Perfil de estatísticas atualmente selecionado (persiste no localStorage
+  // deste aparelho — cada dispositivo escolhe seu próprio perfil ativo).
+  get perfilAtivoId() {
+    const raw = localStorage.getItem('ta_perfil_ativo_id');
+    return raw ? Number(raw) : null;
+  },
+  set perfilAtivoId(id) {
+    if (id == null) localStorage.removeItem('ta_perfil_ativo_id');
+    else localStorage.setItem('ta_perfil_ativo_id', String(id));
+  },
+
   // ---------- CRUD genérico ----------
   add(storeName, obj) {
+    if (PERFIL_SCOPED_STORES.has(storeName) && obj.perfilId == null) {
+      obj = { ...obj, perfilId: db.perfilAtivoId };
+    }
     return tx(storeName, 'readwrite', (store) => store.add(obj));
   },
 
@@ -239,12 +300,21 @@ const db = {
     return tx(storeName, 'readonly', (store) => store.get(id));
   },
 
-  getAll(storeName) {
-    return tx(storeName, 'readonly', (store) => store.getAll());
+  async getAll(storeName) {
+    const todos = await tx(storeName, 'readonly', (store) => store.getAll());
+    if (!PERFIL_SCOPED_STORES.has(storeName)) return todos;
+    const ativo = db.perfilAtivoId;
+    if (ativo == null) return todos; // ainda não resolvido — evita esconder tudo por engano
+    return todos.filter(item => item.perfilId === ativo);
   },
 
-  clear(storeName) {
-    return tx(storeName, 'readwrite', (store) => store.clear());
+  async clear(storeName) {
+    if (!PERFIL_SCOPED_STORES.has(storeName)) {
+      return tx(storeName, 'readwrite', (store) => store.clear());
+    }
+    // Em stores com escopo por perfil, "clear" apaga só os itens do perfil ativo.
+    const itens = await db.getAll(storeName);
+    return Promise.all(itens.map(item => db.remove(storeName, item.id)));
   },
 
   // ---------- Atalhos por entidade ----------
@@ -295,6 +365,16 @@ const db = {
     remove: (id) => db.remove(STORES.cicloSessoes, id),
     getAll: () => db.getAll(STORES.cicloSessoes),
     clear: () => db.clear(STORES.cicloSessoes)
+  },
+
+  // Perfis de estatísticas (não filtrados por perfil — é a própria lista deles).
+  perfis: {
+    add: (p) => db.add(STORES.perfis, p),
+    update: (p) => db.update(STORES.perfis, p),
+    remove: (id) => db.remove(STORES.perfis, id),
+    get: (id) => db.get(STORES.perfis, id),
+    getAll: () => db.getAll(STORES.perfis),
+    clear: () => db.clear(STORES.perfis)
   },
 
   // ---------- Backup ----------
@@ -351,22 +431,22 @@ const db = {
     const listaCicloSessoes = Array.isArray(data.cicloSessoes) ? data.cicloSessoes : [];
 
     for (const t of listaTentativas) {
-      const { id, ...rest } = t;
+      const { id, perfilId, ...rest } = t;
       await db.add(STORES.tentativas, rest);
     }
     for (const e of listaEditais) {
-      const { id, ...rest } = e;
+      const { id, perfilId, ...rest } = e;
       await db.add(STORES.editais, rest);
     }
     for (const s of listaSimulados) {
-      const { id, ...rest } = s;
+      const { id, perfilId, ...rest } = s;
       await db.add(STORES.simulados, rest);
     }
 
     // Mapa do id antigo do ciclo -> novo id gerado (os ids mudam ao reimportar)
     const mapaCicloId = {};
     for (const c of listaCiclos) {
-      const { id, ...rest } = c;
+      const { id, perfilId, ...rest } = c;
       const novoId = await db.add(STORES.ciclos, rest);
       if (id != null) mapaCicloId[id] = novoId;
     }
@@ -383,14 +463,14 @@ const db = {
     }
 
     for (const m of listaCicloMaterias) {
-      const { id, cicloId, ...rest } = m;
+      const { id, cicloId, perfilId, ...rest } = m;
       rest.cicloId = cicloId != null && mapaCicloId[cicloId] != null
         ? mapaCicloId[cicloId]
         : (cicloUnicoIdAntigo ?? cicloId);
       await db.add(STORES.cicloMaterias, rest);
     }
     for (const s of listaCicloSessoes) {
-      const { id, ...rest } = s;
+      const { id, perfilId, ...rest } = s;
       await db.add(STORES.cicloSessoes, rest);
     }
   },

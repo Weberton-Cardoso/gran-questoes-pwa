@@ -4,7 +4,7 @@
  * (dados ficam no IndexedDB, não no cache).
  */
 
-const CACHE_NAME = 'trilha-aprovacao-v20';
+const CACHE_NAME = 'trilha-aprovacao-v22';
 
 const ASSETS_TO_CACHE = [
   './',
@@ -16,6 +16,7 @@ const ASSETS_TO_CACHE = [
   './editais.js',
   './importar-historico.js',
   './ciclo.js',
+  './perfis.js',
   './cloud-sync.js',
   './manifest.json',
   './assets/icon-192.png',

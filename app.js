@@ -105,14 +105,17 @@ const state = {
   ciclos: [],
   cicloMaterias: [],
   cicloSessoes: [],
+  perfis: [],
   dashboardFiltro: { tipo: '7d', inicio: null, fim: null }
 };
 
 async function reloadState() {
-  const [tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes] = await Promise.all([
+  const [tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes, perfis] = await Promise.all([
     db.tentativas.getAll(), db.editais.getAll(), db.simulados.getAll(),
-    db.ciclos.getAll(), db.cicloMaterias.getAll(), db.cicloSessoes.getAll()
+    db.ciclos.getAll(), db.cicloMaterias.getAll(), db.cicloSessoes.getAll(),
+    db.perfis.getAll()
   ]);
+  state.perfis = perfis.sort((a, b) => a.ordem - b.ordem);
   state.ciclos = ciclos.sort((a, b) => a.ordem - b.ordem);
   state.cicloMaterias = cicloMaterias.sort((a, b) => a.ordem - b.ordem);
   state.cicloSessoes = cicloSessoes;
@@ -344,6 +347,7 @@ const PAGE_TITLES = {
   'editais': 'Editais',
   'editais/importar': 'Importar Edital',
   'simulados': 'Simulados',
+  'perfis': 'Perfis',
   'configuracoes': 'Configurações'
 };
 
@@ -358,6 +362,7 @@ async function router() {
 
   closeMobileSidebar();
   await reloadState();
+  atualizarSeletorPerfilUI();
 
   const view = $('#view');
   view.innerHTML = '';
@@ -418,6 +423,10 @@ async function router() {
     $('#page-title').textContent = PAGE_TITLES['simulados'];
     updateActiveNav('simulados');
     renderSimulados(view);
+  } else if (base === 'perfis') {
+    $('#page-title').textContent = PAGE_TITLES['perfis'];
+    updateActiveNav('perfis');
+    renderPerfisPage(view);
   } else if (base === 'configuracoes') {
     $('#page-title').textContent = PAGE_TITLES['configuracoes'];
     updateActiveNav('configuracoes');
@@ -1477,8 +1486,8 @@ function renderConfiguracoes(view) {
 
     <div class="card mt-12">
       <div class="card-title">Zona de risco</div>
-      <p class="text-muted" style="font-size:13.5px;margin-top:0;">Isto apaga permanentemente tentativas, editais e simulados deste dispositivo.</p>
-      <button class="btn btn-danger" id="btn-zerar">Zerar todas as estatísticas</button>
+      <p class="text-muted" style="font-size:13.5px;margin-top:0;">Isto apaga permanentemente as tentativas, editais, ciclos e simulados do perfil ativo (${escapeHtml(state.perfis.find(p => p.id === db.perfilAtivoId)?.nome || '')}) neste dispositivo. Outros perfis não são afetados.</p>
+      <button class="btn btn-danger" id="btn-zerar">Zerar estatísticas deste perfil</button>
     </div>
   `;
 
@@ -1592,12 +1601,15 @@ function initGlobalModalHandlers() {
    INICIALIZAÇÃO
    ============================================================ */
 
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
   applyTheme();
   initSidebar();
   initGlobalModalHandlers();
 
   $('#add-questao-btn').addEventListener('click', () => openTentativaModal());
+
+  await garantirPerfilAtivo();
+  initPerfilSelector();
 
   window.addEventListener('hashchange', router);
   router();

@@ -165,6 +165,35 @@ button{ font-family:inherit; cursor:pointer; }
 .topbar h1{ font-family:var(--font-display); font-size:19px; font-weight:700; margin:0; flex:1; }
 .only-mobile{ display:none; }
 
+.perfil-selector-wrap{ position:relative; flex-shrink:0; }
+.perfil-selector-btn{
+  display:flex; align-items:center; gap:6px; background:var(--surface-2); border:1px solid var(--border);
+  color:var(--text); padding:7px 10px; border-radius:999px; font-size:12.5px; font-weight:600; cursor:pointer;
+  max-width:150px;
+}
+.perfil-selector-btn:hover{ border-color:var(--gold); }
+.perfil-selector-btn span:first-of-type{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.perfil-selector-menu{
+  display:none; position:absolute; top:calc(100% + 6px); left:0; min-width:220px; z-index:60;
+  background:var(--surface-2); border:1px solid var(--border); border-radius:var(--radius-sm);
+  box-shadow:var(--shadow); overflow:hidden;
+}
+.perfil-selector-menu.show{ display:block; }
+.perfil-selector-menu button{
+  display:flex; align-items:center; justify-content:space-between; gap:8px; width:100%; text-align:left;
+  background:none; border:none; color:var(--text); font-size:13.5px; padding:10px 14px; cursor:pointer;
+}
+.perfil-selector-menu button:hover{ background:var(--surface-hover); }
+.perfil-selector-menu button.ativo{ color:var(--gold); font-weight:700; }
+.perfil-selector-menu .divisor{ border-top:1px solid var(--border); margin:4px 0; }
+.perfil-selector-menu .gerenciar{ color:var(--text-muted); font-size:12.5px; }
+
+@media (max-width:520px){
+  .perfil-selector-btn{ max-width:96px; padding:7px 8px; }
+  #add-questao-btn .btn-label{ display:none; }
+  #add-questao-btn{ padding:10px 12px; }
+}
+
 .view{ padding:24px; max-width:1280px; width:100%; margin:0 auto; }
 
 .sidebar-overlay{
@@ -653,3 +682,9 @@ tr.row-motivo td{ padding-top:0; padding-bottom:8px; border-top:none; }
 }
 .tentativa-card-acoes{ display:flex; gap:8px; margin-top:12px; }
 .tentativa-card-acoes .btn{ flex:1; justify-content:center; display:flex; align-items:center; gap:6px; }
+
+/* ---- Tela de Perfis ---- */
+.perfis-lista{ display:flex; flex-direction:column; gap:12px; }
+.perfil-card{ border-color:var(--border); }
+.perfil-card.ativo{ border-color:var(--gold); }
+.perfil-card-acoes{ display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }

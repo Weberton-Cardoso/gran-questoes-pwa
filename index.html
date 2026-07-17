@@ -83,6 +83,10 @@
         <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 2l7 4v6c0 5-3.4 8.6-7 10-3.6-1.4-7-5-7-10V6z"/></svg>
         <span>Simulados</span>
       </a>
+      <a href="#/perfis" class="nav-item" data-route="perfis">
+        <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 12a5 5 0 100-10 5 5 0 000 10zm0 2c-4.4 0-8 2.24-8 5v2h16v-2c0-2.76-3.6-5-8-5z"/></svg>
+        <span>Perfis</span>
+      </a>
       <a href="#/configuracoes" class="nav-item" data-route="configuracoes">
         <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M19.14 12.94a7.14 7.14 0 000-1.88l2.03-1.58a.5.5 0 00.12-.64l-1.92-3.32a.5.5 0 00-.6-.22l-2.39.96a7.3 7.3 0 00-1.63-.94l-.36-2.54a.5.5 0 00-.5-.42h-3.84a.5.5 0 00-.5.42l-.36 2.54c-.59.24-1.14.56-1.63.94l-2.39-.96a.5.5 0 00-.6.22L2.7 8.84a.5.5 0 00.12.64l2.03 1.58a7.14 7.14 0 000 1.88L2.82 14.5a.5.5 0 00-.12.64l1.92 3.32c.14.24.42.32.6.22l2.39-.96c.49.38 1.04.7 1.63.94l.36 2.54c.05.24.26.42.5.42h3.84c.24 0 .45-.18.5-.42l.36-2.54c.59-.24 1.14-.56 1.63-.94l2.39.96c.24.1.5 0 .6-.22l1.92-3.32a.5.5 0 00-.12-.64zM12 15.5a3.5 3.5 0 110-7 3.5 3.5 0 010 7z"/></svg>
         <span>Configurações</span>
@@ -110,10 +114,18 @@
       <button id="mobile-menu-btn" class="icon-btn only-mobile" aria-label="Abrir menu">
         <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M4 6h16v2H4zM4 11h16v2H4zM4 16h16v2H4z"/></svg>
       </button>
+      <div class="perfil-selector-wrap" id="perfil-selector-wrap">
+        <button id="perfil-selector-btn" class="perfil-selector-btn" title="Trocar perfil de estatísticas">
+          <svg viewBox="0 0 24 24" width="15" height="15"><path fill="currentColor" d="M12 12a5 5 0 100-10 5 5 0 000 10zm0 2c-4.4 0-8 2.24-8 5v2h16v-2c0-2.76-3.6-5-8-5z"/></svg>
+          <span id="perfil-selector-nome">Perfil</span>
+          <svg viewBox="0 0 24 24" width="14" height="14"><path fill="currentColor" d="M7 10l5 5 5-5z"/></svg>
+        </button>
+        <div class="perfil-selector-menu" id="perfil-selector-menu"></div>
+      </div>
       <h1 id="page-title">Dashboard</h1>
       <button id="add-questao-btn" class="btn btn-primary btn-sm">
         <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M11 5h2v6h6v2h-6v6h-2v-6H5v-2h6z"/></svg>
-        Registrar tentativa
+        <span class="btn-label">Registrar tentativa</span>
       </button>
     </header>
 
@@ -144,6 +156,7 @@
 <script src="editais.js"></script>
 <script src="importar-historico.js"></script>
 <script src="ciclo.js"></script>
+<script src="perfis.js"></script>
 <script src="cloud-sync.js"></script>
 <script src="app.js"></script>
 <script>
