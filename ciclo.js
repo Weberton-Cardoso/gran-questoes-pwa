@@ -16,6 +16,16 @@
 
 let _cicloTimerInterval = null;
 
+/** Tipos de estudo (mesma ideia de apps como o Estude Aqui) que podem ser
+ *  marcados em cada sessão — tanto ao usar o cronômetro quanto ao lançar
+ *  tempo manualmente. Ajuda a ver depois, por disciplina, como o tempo
+ *  foi distribuído entre teoria, revisão, exercícios etc. */
+const CICLO_TIPOS_ESTUDO = [
+  'PDF', 'Livro', 'Vídeo', 'Revisão', 'Exercícios', 'Simulado', 'Aula presencial',
+  'Lei seca', 'Jurisprudência', 'Doutrina', 'Áudio', 'Discursivas', 'Prática forense',
+  'Fase oral', 'Flashcards', 'Súmula', 'Outros'
+];
+
 function _formatarMinutos(min) {
   min = Math.round(min);
   const h = Math.floor(min / 60);
@@ -42,6 +52,17 @@ function _cicloSomaPesos(materias) {
 
 function _cicloMetaMinutos(materia, materiasDoCiclo, minutosCicloTotal) {
   return Math.round((materia.peso / _cicloSomaPesos(materiasDoCiclo)) * minutosCicloTotal);
+}
+
+/** Lista (sem repetição, mais recente primeiro) dos tipos de estudo já
+ *  registrados nas sessões de uma disciplina do ciclo. */
+function _tiposEstudadosDaMateria(cicloMateriaId) {
+  const sessoes = state.cicloSessoes.filter(s => s.cicloMateriaId === cicloMateriaId && s.tipo);
+  const vistos = [];
+  for (let i = sessoes.length - 1; i >= 0; i--) {
+    if (!vistos.includes(sessoes[i].tipo)) vistos.push(sessoes[i].tipo);
+  }
+  return vistos;
 }
 
 /** Tempo decorrido (ms) de uma sessão ativa, descontando o tempo em pausa
@@ -335,37 +356,150 @@ function renderCicloPainelRoute(view, cicloId) {
   $$('[data-iniciar]', view).forEach(btn => {
     btn.addEventListener('click', () => {
       if (settings.cicloSessaoAtiva) { showToast('Finalize a sessão atual antes de iniciar outra.', 'error'); return; }
-      settings.cicloSessaoAtiva = { materiaId: Number(btn.dataset.iniciar), inicio: Date.now() };
-      renderCicloPainelRoute(view, cicloId);
+      const materia = state.cicloMaterias.find(m => m.id === Number(btn.dataset.iniciar));
+      if (materia) _abrirModalIniciarSessao(view, cicloId, materia);
     });
   });
 
   $$('[data-manual]', view).forEach(btn => {
-    btn.addEventListener('click', async () => {
+    btn.addEventListener('click', () => {
       const materia = state.cicloMaterias.find(m => m.id === Number(btn.dataset.manual));
-      if (!materia) return;
-      const resposta = prompt(
-        `Tempo TOTAL já estudado em "${materia.nome}" nesta volta (em minutos):`,
-        String(Math.round(materia.minutosFeitos))
-      );
-      if (resposta === null) return;
-      const novoTotal = Number(resposta.replace(',', '.'));
-      if (isNaN(novoTotal) || novoTotal < 0) { showToast('Digite um número válido de minutos.', 'error'); return; }
-
-      const diferenca = novoTotal - materia.minutosFeitos;
-      materia.minutosFeitos = novoTotal;
-      await db.cicloMaterias.update(materia);
-      if (diferenca !== 0) {
-        await db.cicloSessoes.add({
-          cicloMateriaId: materia.id, nome: materia.nome, data: todayISO(),
-          minutos: diferenca, inicio: new Date().toISOString(), fim: new Date().toISOString(),
-          ajusteManual: true
-        });
-      }
-      await reloadState();
-      showToast(`Tempo de ${materia.nome} ajustado para ${_formatarMinutos(novoTotal)}.`, 'success');
-      renderCicloPainelRoute(view, cicloId);
+      if (materia) _abrirModalAdicionarTempo(view, cicloId, materia);
     });
+  });
+}
+
+/* ---- Modal: escolher tipo de estudo antes de iniciar o cronômetro ---- */
+function _abrirModalIniciarSessao(view, cicloId, materia) {
+  openModal(`
+    <h2>Iniciar estudo</h2>
+    <p class="text-muted" style="font-size:13.5px;margin-top:-10px;">${escapeHtml(materia.nome)}</p>
+    <div class="form-row">
+      <label>Tipo de estudo (opcional)</label>
+      <select id="iniciar-sessao-tipo">
+        <option value="">Não especificar</option>
+        ${CICLO_TIPOS_ESTUDO.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('')}
+      </select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-cancelar-iniciar-sessao">Cancelar</button>
+      <button class="btn btn-primary" id="btn-confirmar-iniciar-sessao">Iniciar cronômetro</button>
+    </div>
+  `);
+  $('#btn-cancelar-iniciar-sessao').addEventListener('click', closeModal);
+  $('#btn-confirmar-iniciar-sessao').addEventListener('click', () => {
+    const tipo = $('#iniciar-sessao-tipo').value || null;
+    closeModal();
+    settings.cicloSessaoAtiva = { materiaId: materia.id, inicio: Date.now(), tipo };
+    renderCicloPainelRoute(view, cicloId);
+  });
+}
+
+/* ---- Modal: ADICIONAR tempo (soma ao que já está registrado, sem apagar nada) ---- */
+function _abrirModalAdicionarTempo(view, cicloId, materia) {
+  openModal(`
+    <h2>Adicionar tempo</h2>
+    <p class="text-muted" style="font-size:13.5px;margin-top:-10px;">
+      ${escapeHtml(materia.nome)} · já registrado nesta volta: <strong>${_formatarMinutos(materia.minutosFeitos)}</strong>
+    </p>
+    <p class="text-muted" style="font-size:13px;">
+      O valor abaixo é <strong>somado</strong> ao tempo que já está registrado — nada do que já foi salvo se perde.
+    </p>
+    <div class="form-row">
+      <label>Adicionar (minutos)</label>
+      <input type="number" id="add-tempo-min" min="0" step="1" value="0">
+    </div>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; margin:2px 0 4px;">
+      ${[5, 15, 30, 45, 60, 90].map(n => `<button type="button" class="chip" data-add-min="${n}">+${n}min</button>`).join('')}
+    </div>
+    <div class="form-row">
+      <label>Tipo de estudo (opcional)</label>
+      <select id="add-tempo-tipo">
+        <option value="">Não especificar</option>
+        ${CICLO_TIPOS_ESTUDO.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join('')}
+      </select>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-cancelar-add-tempo">Cancelar</button>
+      <button class="btn btn-primary" id="btn-confirmar-add-tempo">Adicionar</button>
+    </div>
+    <p style="margin-top:16px;">
+      <a href="#" id="link-corrigir-total" style="font-size:12.5px;">Corrigir o total manualmente (em vez de somar)</a>
+    </p>
+  `);
+
+  const input = $('#add-tempo-min');
+  $$('[data-add-min]').forEach(chip => {
+    chip.addEventListener('click', () => {
+      input.value = Number(input.value || 0) + Number(chip.dataset.addMin);
+    });
+  });
+
+  $('#btn-cancelar-add-tempo').addEventListener('click', closeModal);
+
+  $('#btn-confirmar-add-tempo').addEventListener('click', async () => {
+    const minutosAdicionados = Number(input.value);
+    if (isNaN(minutosAdicionados) || minutosAdicionados <= 0) {
+      showToast('Digite um número de minutos maior que zero.', 'error');
+      return;
+    }
+    const tipo = $('#add-tempo-tipo').value || null;
+    materia.minutosFeitos += minutosAdicionados;
+    await db.cicloMaterias.update(materia);
+    await db.cicloSessoes.add({
+      cicloMateriaId: materia.id, nome: materia.nome, data: todayISO(),
+      minutos: minutosAdicionados, inicio: new Date().toISOString(), fim: new Date().toISOString(),
+      ajusteManual: true, tipo
+    });
+    await reloadState();
+    closeModal();
+    showToast(`+${_formatarMinutos(minutosAdicionados)} adicionados em ${materia.nome}.`, 'success');
+    renderCicloPainelRoute(view, cicloId);
+  });
+
+  $('#link-corrigir-total').addEventListener('click', (e) => {
+    e.preventDefault();
+    closeModal();
+    _abrirModalCorrigirTotal(view, cicloId, materia);
+  });
+}
+
+/* ---- Modal: corrigir (substituir) o total — só para consertar um erro de lançamento ---- */
+function _abrirModalCorrigirTotal(view, cicloId, materia) {
+  openModal(`
+    <h2>Corrigir total</h2>
+    <p class="text-muted" style="font-size:13.5px;margin-top:-10px;">${escapeHtml(materia.nome)}</p>
+    <p class="text-muted" style="font-size:13px;">
+      Isto <strong>substitui</strong> o tempo total já registrado nesta volta. Use apenas para corrigir um lançamento errado —
+      para somar mais tempo estudado, prefira "Adicionar tempo".
+    </p>
+    <div class="form-row">
+      <label>Tempo TOTAL nesta volta (minutos)</label>
+      <input type="number" id="corrigir-total-min" min="0" step="1" value="${Math.round(materia.minutosFeitos)}">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="btn-cancelar-corrigir">Cancelar</button>
+      <button class="btn btn-primary" id="btn-confirmar-corrigir">Salvar</button>
+    </div>
+  `);
+  $('#btn-cancelar-corrigir').addEventListener('click', closeModal);
+  $('#btn-confirmar-corrigir').addEventListener('click', async () => {
+    const novoTotal = Number($('#corrigir-total-min').value);
+    if (isNaN(novoTotal) || novoTotal < 0) { showToast('Digite um número válido de minutos.', 'error'); return; }
+    const diferenca = novoTotal - materia.minutosFeitos;
+    materia.minutosFeitos = novoTotal;
+    await db.cicloMaterias.update(materia);
+    if (diferenca !== 0) {
+      await db.cicloSessoes.add({
+        cicloMateriaId: materia.id, nome: materia.nome, data: todayISO(),
+        minutos: diferenca, inicio: new Date().toISOString(), fim: new Date().toISOString(),
+        ajusteManual: true
+      });
+    }
+    await reloadState();
+    closeModal();
+    showToast(`Tempo de ${materia.nome} corrigido para ${_formatarMinutos(novoTotal)}.`, 'success');
+    renderCicloPainelRoute(view, cicloId);
   });
 }
 
@@ -376,6 +510,7 @@ function _renderCicloSessaoAtivaCard(sessaoAtiva) {
     <div class="card mb-16 ciclo-sessao-ativa">
       <div class="card-title" style="margin-bottom:2px;">${pausado ? 'Pausado' : 'Estudando agora'}</div>
       <div style="font-size:15px; font-weight:700;">${escapeHtml(materia ? materia.nome : '')}</div>
+      ${sessaoAtiva.tipo ? `<span class="badge muted" style="margin-top:4px;">${escapeHtml(sessaoAtiva.tipo)}</span>` : ''}
       <div class="ciclo-cronometro ${pausado ? 'pausado' : ''}" id="ciclo-cronometro">00:00</div>
       <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
         ${pausado
@@ -394,6 +529,7 @@ function _renderCicloLinhaMateria(m, materiasDoCiclo, minutosCicloTotal, sessaoA
   const pct = meta ? Math.min(100, (m.minutosFeitos / meta) * 100) : 0;
   const concluida = meta > 0 && m.minutosFeitos >= meta;
   const emAndamento = sessaoAtiva && sessaoAtiva.materiaId === m.id;
+  const tipos = _tiposEstudadosDaMateria(m.id);
   return `
     <div class="ciclo-materia-row ${emAndamento ? 'ativa' : ''}">
       <div class="ciclo-materia-topo">
@@ -404,11 +540,16 @@ function _renderCicloLinhaMateria(m, materiasDoCiclo, minutosCicloTotal, sessaoA
         <div class="pct-bar" style="flex:1;"><span style="width:${pct}%"></span></div>
         <span class="num">${_formatarMinutos(m.minutosFeitos)} / ${_formatarMinutos(meta)}</span>
       </div>
+      ${tipos.length ? `
+        <div style="display:flex; gap:6px; flex-wrap:wrap; margin-top:8px;">
+          ${tipos.map(t => `<span class="badge muted" style="font-size:11px;">${escapeHtml(t)}</span>`).join('')}
+        </div>
+      ` : ''}
       <div class="ciclo-materia-acoes">
         ${emAndamento
           ? `<span class="text-muted" style="font-size:12.5px;align-self:center;">Em andamento…</span>`
           : `<button class="btn btn-sm" data-iniciar="${m.id}" ${sessaoAtiva ? 'disabled' : ''}>Iniciar</button>
-             <button class="btn btn-sm btn-ghost" data-manual="${m.id}">Editar tempo</button>`
+             <button class="btn btn-sm btn-ghost" data-manual="${m.id}">Adicionar tempo</button>`
         }
       </div>
     </div>
@@ -458,7 +599,8 @@ async function _concluirSessaoCiclo(view, cicloId) {
     await db.cicloMaterias.update(materia);
     await db.cicloSessoes.add({
       cicloMateriaId: materia.id, nome: materia.nome, data: todayISO(),
-      minutos, inicio: new Date(sessaoAtiva.inicio).toISOString(), fim: new Date().toISOString()
+      minutos, inicio: new Date(sessaoAtiva.inicio).toISOString(), fim: new Date().toISOString(),
+      tipo: sessaoAtiva.tipo || null
     });
   }
   settings.cicloSessaoAtiva = null;
