@@ -615,6 +615,7 @@ tr.row-motivo td{ padding-top:0; padding-bottom:8px; border-top:none; }
   font-family:var(--font-mono); font-size:44px; font-weight:700; letter-spacing:1px;
   color:var(--gold); text-align:center; padding:10px 0;
 }
+.ciclo-cronometro.pausado{ color:var(--text-faint); }
 .ciclo-lista{ display:flex; flex-direction:column; gap:14px; }
 .ciclo-materia-row{
   padding:12px 14px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface-2);

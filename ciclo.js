@@ -44,6 +44,14 @@ function _cicloMetaMinutos(materia, materiasDoCiclo, minutosCicloTotal) {
   return Math.round((materia.peso / _cicloSomaPesos(materiasDoCiclo)) * minutosCicloTotal);
 }
 
+/** Tempo decorrido (ms) de uma sessão ativa, descontando o tempo em pausa
+ *  (inclusive a pausa em andamento agora, se houver). */
+function _cicloElapsedMs(sessaoAtiva, agora = Date.now()) {
+  let pausadoTotal = sessaoAtiva.tempoPausadoAcumulado || 0;
+  if (sessaoAtiva.pausadoEm) pausadoTotal += (agora - sessaoAtiva.pausadoEm);
+  return Math.max(0, agora - sessaoAtiva.inicio - pausadoTotal);
+}
+
 /* ---- Lista de todos os ciclos (#/ciclo) ---- */
 function renderCiclosLista(view) {
   clearInterval(_cicloTimerInterval);
@@ -318,6 +326,10 @@ function renderCicloPainelRoute(view, cicloId) {
     _iniciarCronometroVisual();
     $('#btn-concluir-sessao').addEventListener('click', () => _concluirSessaoCiclo(view, cicloId));
     $('#btn-cancelar-sessao').addEventListener('click', () => _cancelarSessaoCiclo(view, cicloId));
+    const btnPausar = $('#btn-pausar-sessao');
+    if (btnPausar) btnPausar.addEventListener('click', () => _pausarSessaoCiclo(view, cicloId));
+    const btnRetomar = $('#btn-retomar-sessao');
+    if (btnRetomar) btnRetomar.addEventListener('click', () => _retomarSessaoCiclo(view, cicloId));
   }
 
   $$('[data-iniciar]', view).forEach(btn => {
@@ -330,18 +342,28 @@ function renderCicloPainelRoute(view, cicloId) {
 
   $$('[data-manual]', view).forEach(btn => {
     btn.addEventListener('click', async () => {
-      const minutos = Number(prompt('Quantos minutos você quer adicionar a essa disciplina?', '25'));
-      if (!minutos || minutos <= 0) return;
       const materia = state.cicloMaterias.find(m => m.id === Number(btn.dataset.manual));
       if (!materia) return;
-      materia.minutosFeitos += minutos;
+      const resposta = prompt(
+        `Tempo TOTAL já estudado em "${materia.nome}" nesta volta (em minutos):`,
+        String(Math.round(materia.minutosFeitos))
+      );
+      if (resposta === null) return;
+      const novoTotal = Number(resposta.replace(',', '.'));
+      if (isNaN(novoTotal) || novoTotal < 0) { showToast('Digite um número válido de minutos.', 'error'); return; }
+
+      const diferenca = novoTotal - materia.minutosFeitos;
+      materia.minutosFeitos = novoTotal;
       await db.cicloMaterias.update(materia);
-      await db.cicloSessoes.add({
-        cicloMateriaId: materia.id, nome: materia.nome, data: todayISO(),
-        minutos, inicio: new Date().toISOString(), fim: new Date().toISOString()
-      });
+      if (diferenca !== 0) {
+        await db.cicloSessoes.add({
+          cicloMateriaId: materia.id, nome: materia.nome, data: todayISO(),
+          minutos: diferenca, inicio: new Date().toISOString(), fim: new Date().toISOString(),
+          ajusteManual: true
+        });
+      }
       await reloadState();
-      showToast(`+${_formatarMinutos(minutos)} em ${materia.nome}`, 'success');
+      showToast(`Tempo de ${materia.nome} ajustado para ${_formatarMinutos(novoTotal)}.`, 'success');
       renderCicloPainelRoute(view, cicloId);
     });
   });
@@ -349,12 +371,17 @@ function renderCicloPainelRoute(view, cicloId) {
 
 function _renderCicloSessaoAtivaCard(sessaoAtiva) {
   const materia = state.cicloMaterias.find(m => m.id === sessaoAtiva.materiaId);
+  const pausado = !!sessaoAtiva.pausadoEm;
   return `
     <div class="card mb-16 ciclo-sessao-ativa">
-      <div class="card-title" style="margin-bottom:2px;">Estudando agora</div>
+      <div class="card-title" style="margin-bottom:2px;">${pausado ? 'Pausado' : 'Estudando agora'}</div>
       <div style="font-size:15px; font-weight:700;">${escapeHtml(materia ? materia.nome : '')}</div>
-      <div class="ciclo-cronometro" id="ciclo-cronometro">00:00</div>
-      <div style="display:flex; gap:10px; justify-content:center;">
+      <div class="ciclo-cronometro ${pausado ? 'pausado' : ''}" id="ciclo-cronometro">00:00</div>
+      <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+        ${pausado
+          ? `<button class="btn btn-primary" id="btn-retomar-sessao">Retomar</button>`
+          : `<button class="btn" id="btn-pausar-sessao">Pausar</button>`
+        }
         <button class="btn btn-primary" id="btn-concluir-sessao">Concluir sessão</button>
         <button class="btn btn-ghost" id="btn-cancelar-sessao">Cancelar</button>
       </div>
@@ -381,7 +408,7 @@ function _renderCicloLinhaMateria(m, materiasDoCiclo, minutosCicloTotal, sessaoA
         ${emAndamento
           ? `<span class="text-muted" style="font-size:12.5px;align-self:center;">Em andamento…</span>`
           : `<button class="btn btn-sm" data-iniciar="${m.id}" ${sessaoAtiva ? 'disabled' : ''}>Iniciar</button>
-             <button class="btn btn-sm btn-ghost" data-manual="${m.id}">+ tempo manual</button>`
+             <button class="btn btn-sm btn-ghost" data-manual="${m.id}">Editar tempo</button>`
         }
       </div>
     </div>
@@ -394,18 +421,37 @@ function _iniciarCronometroVisual() {
     const sessaoAtiva = settings.cicloSessaoAtiva;
     const span = $('#ciclo-cronometro');
     if (!sessaoAtiva || !span) { clearInterval(_cicloTimerInterval); return; }
-    const seg = Math.floor((Date.now() - sessaoAtiva.inicio) / 1000);
+    const seg = Math.floor(_cicloElapsedMs(sessaoAtiva) / 1000);
     span.textContent = _formatarCronometro(seg);
   }
   tick();
   _cicloTimerInterval = setInterval(tick, 1000);
 }
 
+function _pausarSessaoCiclo(view, cicloId) {
+  const sessaoAtiva = settings.cicloSessaoAtiva;
+  if (!sessaoAtiva || sessaoAtiva.pausadoEm) return;
+  settings.cicloSessaoAtiva = { ...sessaoAtiva, pausadoEm: Date.now() };
+  renderCicloPainelRoute(view, cicloId);
+}
+
+function _retomarSessaoCiclo(view, cicloId) {
+  const sessaoAtiva = settings.cicloSessaoAtiva;
+  if (!sessaoAtiva || !sessaoAtiva.pausadoEm) return;
+  const pausadoAgora = Date.now() - sessaoAtiva.pausadoEm;
+  settings.cicloSessaoAtiva = {
+    ...sessaoAtiva,
+    pausadoEm: null,
+    tempoPausadoAcumulado: (sessaoAtiva.tempoPausadoAcumulado || 0) + pausadoAgora
+  };
+  renderCicloPainelRoute(view, cicloId);
+}
+
 async function _concluirSessaoCiclo(view, cicloId) {
   const sessaoAtiva = settings.cicloSessaoAtiva;
   if (!sessaoAtiva) return;
   clearInterval(_cicloTimerInterval);
-  const minutos = (Date.now() - sessaoAtiva.inicio) / 60000;
+  const minutos = _cicloElapsedMs(sessaoAtiva) / 60000;
   const materia = state.cicloMaterias.find(m => m.id === sessaoAtiva.materiaId);
   if (materia && minutos > 0) {
     materia.minutosFeitos += minutos;
