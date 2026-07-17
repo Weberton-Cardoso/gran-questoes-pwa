@@ -106,7 +106,8 @@ const state = {
   cicloMaterias: [],
   cicloSessoes: [],
   perfis: [],
-  dashboardFiltro: { tipo: '7d', inicio: null, fim: null }
+  dashboardFiltro: { tipo: '7d', inicio: null, fim: null },
+  statsDisciplinaFiltro: { tipo: 'tudo', inicio: null, fim: null, disciplina: 'todas' }
 };
 
 async function reloadState() {
@@ -455,6 +456,7 @@ function resolverPeriodo(filtro) {
     case '7d': return { inicio: daysAgoISO(6), fim: hoje };
     case '30d': return { inicio: daysAgoISO(29), fim: hoje };
     case '90d': return { inicio: daysAgoISO(89), fim: hoje };
+    case 'tudo': return { inicio: '1970-01-01', fim: hoje };
     case 'custom': return { inicio: filtro.inicio || daysAgoISO(6), fim: filtro.fim || hoje };
     default: return { inicio: daysAgoISO(6), fim: hoje };
   }
@@ -612,6 +614,8 @@ function renderDashboard(view) {
     </div>
 
     ${buildDashboardEditalHTML()}
+
+    <div class="card mt-12" id="card-stats-disciplina"></div>
   `;
 
   // filtros
@@ -661,6 +665,91 @@ function renderDashboard(view) {
   });
 
   initDashboardEditalChart();
+  renderStatsPorDisciplina();
+}
+
+/** Seção "Estatísticas por disciplina" da Dashboard — tem seu próprio filtro
+ *  de período (mesmo componente de chips + data usado no resto da Dashboard)
+ *  e um filtro de disciplina. Atualiza sozinha, sem re-renderizar o resto
+ *  da página (gráficos e cards existentes não são tocados). */
+function renderStatsPorDisciplina() {
+  const card = $('#card-stats-disciplina');
+  if (!card) return;
+
+  const filtro = state.statsDisciplinaFiltro;
+  const { inicio, fim } = resolverPeriodo(filtro);
+  const listaPeriodo = filtrarTentativasPorPeriodo(inicio, fim);
+  const listaFiltrada = filtro.disciplina === 'todas'
+    ? listaPeriodo
+    : listaPeriodo.filter(t => _norm(t.disciplina) === _norm(filtro.disciplina));
+
+  const porDisciplina = agruparPor(listaFiltrada, 'disciplina'); // já vem ordenado por total desc
+  const disciplinasDisponiveis = valoresUnicos('disciplina');
+
+  card.innerHTML = `
+    <div class="card-title">Estatísticas por disciplina</div>
+
+    <div class="filter-bar" id="stats-disc-filters" style="margin-top:14px;">
+      ${['hoje', '7d', '30d', '90d', 'tudo', 'custom'].map(t => `
+        <button class="chip ${filtro.tipo === t ? 'active' : ''}" data-filtro="${t}">
+          ${{hoje:'Hoje', '7d':'Últimos 7 dias', '30d':'Últimos 30 dias', '90d':'Últimos 90 dias', tudo:'Tudo', custom:'Personalizado'}[t]}
+        </button>
+      `).join('')}
+      <div id="stats-disc-custom-range" style="display:${filtro.tipo === 'custom' ? 'flex' : 'none'};gap:8px;align-items:center;">
+        <input type="date" id="stats-disc-inicio" value="${filtro.inicio || daysAgoISO(6)}">
+        <span class="text-muted">até</span>
+        <input type="date" id="stats-disc-fim" value="${filtro.fim || todayISO()}">
+      </div>
+      <select class="status-select" id="stats-disc-select" style="margin-left:auto;">
+        <option value="todas" ${filtro.disciplina === 'todas' ? 'selected' : ''}>Todas as disciplinas</option>
+        ${disciplinasDisponiveis.map(d => `<option value="${escapeHtml(d)}" ${filtro.disciplina === d ? 'selected' : ''}>${escapeHtml(d)}</option>`).join('')}
+      </select>
+    </div>
+
+    <div class="table-wrap">
+      ${porDisciplina.length ? `
+        <table>
+          <thead>
+            <tr><th>Disciplina</th><th>Certas</th><th>Erradas</th><th>Total</th><th>%</th></tr>
+          </thead>
+          <tbody>
+            ${porDisciplina.map(d => `
+              <tr>
+                <td>${escapeHtml(d.nome)}</td>
+                <td class="num" style="color:var(--success)">${d.certas}</td>
+                <td class="num" style="color:var(--danger)">${d.erradas}</td>
+                <td class="num">${d.total}</td>
+                <td class="num" style="font-weight:700;">${fmtPct(d.taxa)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      ` : `<p class="text-muted" style="font-size:13.5px;">Nenhuma tentativa registrada nesse período.</p>`}
+    </div>
+  `;
+
+  $$('#stats-disc-filters .chip', card).forEach(chip => {
+    chip.addEventListener('click', () => {
+      state.statsDisciplinaFiltro.tipo = chip.dataset.filtro;
+      renderStatsPorDisciplina();
+    });
+  });
+  const inicioInput = $('#stats-disc-inicio', card);
+  const fimInput = $('#stats-disc-fim', card);
+  if (inicioInput) inicioInput.addEventListener('change', () => {
+    state.statsDisciplinaFiltro.tipo = 'custom';
+    state.statsDisciplinaFiltro.inicio = inicioInput.value;
+    renderStatsPorDisciplina();
+  });
+  if (fimInput) fimInput.addEventListener('change', () => {
+    state.statsDisciplinaFiltro.tipo = 'custom';
+    state.statsDisciplinaFiltro.fim = fimInput.value;
+    renderStatsPorDisciplina();
+  });
+  $('#stats-disc-select', card).addEventListener('change', (e) => {
+    state.statsDisciplinaFiltro.disciplina = e.target.value;
+    renderStatsPorDisciplina();
+  });
 }
 
 /* ============================================================

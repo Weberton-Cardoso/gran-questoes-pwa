@@ -192,6 +192,7 @@ button{ font-family:inherit; cursor:pointer; }
   .perfil-selector-btn{ max-width:96px; padding:7px 8px; }
   #add-questao-btn .btn-label{ display:none; }
   #add-questao-btn{ padding:10px 12px; }
+  #stats-disc-select{ margin-left:0 !important; width:100%; }
 }
 
 .view{ padding:24px; max-width:1280px; width:100%; margin:0 auto; }
