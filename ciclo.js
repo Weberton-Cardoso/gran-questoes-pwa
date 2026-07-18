@@ -31,6 +31,14 @@ const _CORES_TIPO_ESTUDO = [
   '#F97316', '#84CC16', '#EC4899', '#10B981', '#94A3B8'
 ];
 
+// Cores para diferenciar visualmente cada disciplina na lista do Ciclo de
+// Estudos (borda lateral, bolinha ao lado do nome, barra de progresso).
+// Repete em loop se o ciclo tiver mais disciplinas do que cores na lista.
+const _CORES_MATERIA_CICLO = [
+  '#E8B14D', '#60A5FA', '#F87171', '#34D399', '#C084FC', '#FB923C',
+  '#38BDF8', '#F472B6', '#4ADE80', '#FBBF24', '#A78BFA', '#22D3EE'
+];
+
 /** Soma os minutos estudados (db.cicloSessoes) de todas as disciplinas de
  *  um ciclo, agrupados por tipo de estudo. Sessões sem tipo informado
  *  entram no grupo "Não informado". */
@@ -343,7 +351,7 @@ function renderCicloPainelRoute(view, cicloId) {
     <div class="card">
       <div class="card-title">Disciplinas deste ciclo</div>
       <div class="ciclo-lista mt-12">
-        ${materias.map(m => _renderCicloLinhaMateria(m, materias, totalMeta, sessaoAtiva)).join('')}
+        ${materias.map((m, i) => _renderCicloLinhaMateria(m, materias, totalMeta, sessaoAtiva, i)).join('')}
       </div>
     </div>
 
@@ -575,19 +583,23 @@ function _renderCicloSessaoAtivaCard(sessaoAtiva) {
   `;
 }
 
-function _renderCicloLinhaMateria(m, materiasDoCiclo, minutosCicloTotal, sessaoAtiva) {
+function _renderCicloLinhaMateria(m, materiasDoCiclo, minutosCicloTotal, sessaoAtiva, indice = 0) {
   const meta = _cicloMetaMinutos(m, materiasDoCiclo, minutosCicloTotal);
   const pct = meta ? Math.min(100, (m.minutosFeitos / meta) * 100) : 0;
   const concluida = meta > 0 && m.minutosFeitos >= meta;
   const emAndamento = sessaoAtiva && sessaoAtiva.materiaId === m.id;
+  const cor = _CORES_MATERIA_CICLO[indice % _CORES_MATERIA_CICLO.length];
   return `
-    <div class="ciclo-materia-row ${emAndamento ? 'ativa' : ''}">
+    <div class="ciclo-materia-row ${emAndamento ? 'ativa' : ''}" style="border-left:4px solid ${cor};">
       <div class="ciclo-materia-topo">
-        <span class="ciclo-materia-nome">${escapeHtml(m.nome)}</span>
+        <span class="ciclo-materia-nome">
+          <span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${cor};margin-right:7px;"></span>
+          ${escapeHtml(m.nome)}
+        </span>
         <span class="badge ${concluida ? 'success' : 'muted'}">${concluida ? 'Concluído' : `peso ${m.peso}`}</span>
       </div>
       <div class="pct-bar-wrap mt-8" style="min-width:auto;">
-        <div class="pct-bar" style="flex:1;"><span style="width:${pct}%"></span></div>
+        <div class="pct-bar" style="flex:1;"><span style="width:${pct}%;background:${cor};"></span></div>
         <span class="num">${_formatarMinutos(m.minutosFeitos)} / ${_formatarMinutos(meta)}</span>
       </div>
       <div class="ciclo-materia-acoes">

@@ -566,6 +566,13 @@ function renderDashboard(view) {
   const porDisciplina = agruparPor(lista, 'disciplina').slice(0, 6);
   const trilha = calcTrilhaDias(30);
 
+  // Tempo total estudado HOJE (Ciclo de Estudos), independente do filtro
+  // de período escolhido acima — é sempre "hoje" mesmo.
+  const hojeISO = todayISO();
+  const minutosHoje = state.cicloSessoes
+    .filter(s => s.data === hojeISO)
+    .reduce((soma, s) => soma + (s.minutos || 0), 0);
+
   view.innerHTML = `
     <div class="filter-bar" id="dash-filters">
       ${['hoje', '7d', '30d', '90d', 'custom'].map(t => `
@@ -574,9 +581,9 @@ function renderDashboard(view) {
         </button>
       `).join('')}
       <div id="custom-range" style="display:${filtro.tipo === 'custom' ? 'flex' : 'none'};gap:8px;align-items:center;">
-        <input type="date" id="filtro-inicio" value="${filtro.inicio || daysAgoISO(6)}">
+        <input type="date" id="filtro-inicio" min="2015-01-01" max="${daysAgoISO(-1)}" value="${filtro.inicio || daysAgoISO(6)}">
         <span class="text-muted">até</span>
-        <input type="date" id="filtro-fim" value="${filtro.fim || todayISO()}">
+        <input type="date" id="filtro-fim" min="2015-01-01" max="${daysAgoISO(-1)}" value="${filtro.fim || todayISO()}">
       </div>
     </div>
 
@@ -588,6 +595,7 @@ function renderDashboard(view) {
       <div class="stat-card info"><div class="label">Tentativas registradas</div><div class="value">${resumo.tentativas}</div></div>
       <div class="stat-card"><div class="label">Média de questões/dia</div><div class="value">${mediaDiaria.toFixed(1)}</div></div>
       <div class="stat-card gold"><div class="label">Sequência de dias</div><div class="value">${streak} 🔥</div></div>
+      <div class="stat-card info"><div class="label">Tempo estudado hoje</div><div class="value">${_formatarMinutos(minutosHoje)}</div></div>
     </div>
 
     <div class="grid-2 mb-12">
@@ -696,9 +704,9 @@ function renderStatsPorDisciplina() {
         </button>
       `).join('')}
       <div id="stats-disc-custom-range" style="display:${filtro.tipo === 'custom' ? 'flex' : 'none'};gap:8px;align-items:center;">
-        <input type="date" id="stats-disc-inicio" value="${filtro.inicio || daysAgoISO(6)}">
+        <input type="date" id="stats-disc-inicio" min="2015-01-01" max="${daysAgoISO(-1)}" value="${filtro.inicio || daysAgoISO(6)}">
         <span class="text-muted">até</span>
-        <input type="date" id="stats-disc-fim" value="${filtro.fim || todayISO()}">
+        <input type="date" id="stats-disc-fim" min="2015-01-01" max="${daysAgoISO(-1)}" value="${filtro.fim || todayISO()}">
       </div>
       <select class="status-select" id="stats-disc-select" style="margin-left:auto;">
         <option value="todas" ${filtro.disciplina === 'todas' ? 'selected' : ''}>Todas as disciplinas</option>
