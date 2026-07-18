@@ -16,6 +16,26 @@
 
 let _cicloTimerInterval = null;
 
+// Tipos de estudo que podem ser marcados numa sessão/registro de tempo do
+// Ciclo de Estudos (ex.: PDF, Videoaula, Exercícios...). Fica salvo junto
+// com a sessão em db.cicloSessoes, no campo tipoEstudo.
+const TIPOS_ESTUDO_CICLO = [
+  'PDF', 'Livro', 'Vídeo', 'Revisão', 'Exercícios', 'Simulado',
+  'Aula presencial', 'Lei Seca', 'Jurisprudência', 'Doutrina', 'Áudio',
+  'Discursivas', 'Prática Forense', 'Fase Oral', 'Flashcards', 'Súmula', 'Outros'
+];
+
+function _perguntarTipoEstudo() {
+  const lista = TIPOS_ESTUDO_CICLO.map((t, i) => `${i + 1}) ${t}`).join('\n');
+  const resposta = prompt(
+    `Tipo de estudo (opcional) — digite o número, ou deixe em branco pra não informar:\n${lista}`,
+    ''
+  );
+  if (resposta === null || resposta.trim() === '') return null;
+  const indice = Number(resposta.trim()) - 1;
+  return TIPOS_ESTUDO_CICLO[indice] || null;
+}
+
 function _formatarMinutos(min) {
   min = Math.round(min);
   const h = Math.floor(min / 60);
@@ -346,6 +366,10 @@ function renderCicloPainelRoute(view, cicloId) {
     if (btnPausar) btnPausar.addEventListener('click', () => _pausarSessaoCiclo(view, cicloId));
     const btnRetomar = $('#btn-retomar-sessao');
     if (btnRetomar) btnRetomar.addEventListener('click', () => _retomarSessaoCiclo(view, cicloId));
+    const selTipo = $('#ciclo-tipo-estudo');
+    if (selTipo) selTipo.addEventListener('change', () => {
+      settings.cicloSessaoAtiva = { ...settings.cicloSessaoAtiva, tipoEstudo: selTipo.value || null };
+    });
   }
 
   $$('[data-iniciar]', view).forEach(btn => {
@@ -372,13 +396,14 @@ function renderCicloPainelRoute(view, cicloId) {
 
       const novoTotal = Math.max(0, materia.minutosFeitos + minutosAdicionados);
       const diferenca = novoTotal - materia.minutosFeitos;
+      const tipoEstudo = diferenca !== 0 ? _perguntarTipoEstudo() : null;
       materia.minutosFeitos = novoTotal;
       await db.cicloMaterias.update(materia);
       if (diferenca !== 0) {
         await db.cicloSessoes.add({
           cicloMateriaId: materia.id, nome: materia.nome, data: todayISO(),
           minutos: diferenca, inicio: new Date().toISOString(), fim: new Date().toISOString(),
-          ajusteManual: true
+          ajusteManual: true, tipoEstudo
         });
       }
       await reloadState();
@@ -424,6 +449,13 @@ function _renderCicloSessaoAtivaCard(sessaoAtiva) {
       <div class="card-title" style="margin-bottom:2px;">${pausado ? 'Pausado' : 'Estudando agora'}</div>
       <div style="font-size:15px; font-weight:700;">${escapeHtml(materia ? materia.nome : '')}</div>
       <div class="ciclo-cronometro ${pausado ? 'pausado' : ''}" id="ciclo-cronometro">00:00</div>
+      <div class="form-row mt-8" style="max-width:260px;margin-left:auto;margin-right:auto;">
+        <label>Tipo de estudo (opcional)</label>
+        <select id="ciclo-tipo-estudo">
+          <option value="">— não informar —</option>
+          ${TIPOS_ESTUDO_CICLO.map(t => `<option value="${escapeHtml(t)}" ${sessaoAtiva.tipoEstudo === t ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('')}
+        </select>
+      </div>
       <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
         ${pausado
           ? `<button class="btn btn-primary" id="btn-retomar-sessao">Retomar</button>`
@@ -506,7 +538,8 @@ async function _concluirSessaoCiclo(view, cicloId) {
     await db.cicloMaterias.update(materia);
     await db.cicloSessoes.add({
       cicloMateriaId: materia.id, nome: materia.nome, data: todayISO(),
-      minutos, inicio: new Date(sessaoAtiva.inicio).toISOString(), fim: new Date().toISOString()
+      minutos, inicio: new Date(sessaoAtiva.inicio).toISOString(), fim: new Date().toISOString(),
+      tipoEstudo: sessaoAtiva.tipoEstudo || null
     });
   }
   settings.cicloSessaoAtiva = null;
