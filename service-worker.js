@@ -4,7 +4,7 @@
  * (dados ficam no IndexedDB, não no cache).
  */
 
-const CACHE_NAME = 'trilha-aprovacao-v24';
+const CACHE_NAME = 'trilha-aprovacao-v25';
 
 const ASSETS_TO_CACHE = [
   './',
@@ -59,8 +59,17 @@ self.addEventListener('activate', (event) => {
 // Estratégia: cache-first para os arquivos do app, com fallback de rede.
 // Bibliotecas externas (Chart.js, fontes) usam network-first para não travar
 // caso o CDN atualize, mas caem para cache se estiver offline.
+// Importante: só GET pode ser guardado em cache (a Cache API não suporta
+// POST/PUT/etc — é assim que o Firestore, por exemplo, envia dados).
 self.addEventListener('fetch', (event) => {
   const req = event.request;
+
+  if (req.method !== 'GET') {
+    // Deixa passar direto pra rede, sem tentar cachear (evita o erro
+    // "Request method 'POST' is unsupported" em chamadas do Firestore).
+    return;
+  }
+
   const url = new URL(req.url);
   const isSameOrigin = url.origin === self.location.origin;
 
