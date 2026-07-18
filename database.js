@@ -26,10 +26,16 @@
  *     chamado "Histórico Geral". db.getAll/db.add/db.clear desses stores
  *     agora filtram/marcam automaticamente pelo perfil ativo
  *     (db.perfilAtivoId) — o resto do app não precisa se preocupar com isso.
+ * v8: adiciona BACKUPS AUTOMÁTICOS LOCAIS. Cria o store "backupsLocais"
+ *     (não filtrado por perfil — guarda um retrato de TODOS os perfis de
+ *     uma vez). Toda vez que algo muda no banco, um snapshot completo é
+ *     salvo automaticamente aqui (mantendo só os 10 mais recentes), para
+ *     servir de rede de segurança caso uma sincronização ou importação dê
+ *     errado. Ver db.exportAllRaw / db.importAllRaw / db.criarBackupLocalAutomatico.
  */
 
 const DB_NAME = 'TrilhaAprovacaoDB';
-const DB_VERSION = 7;
+const DB_VERSION = 8;
 
 const STORES = {
   tentativas: 'tentativas',
@@ -39,7 +45,8 @@ const STORES = {
   cicloMaterias: 'cicloMaterias',
   cicloSessoes: 'cicloSessoes',
   cicloConfig: 'cicloConfig',
-  perfis: 'perfis'
+  perfis: 'perfis',
+  backupsLocais: 'backupsLocais'
 };
 
 /** Stores que pertencem a um perfil de estatísticas específico — getAll/add/clear
@@ -238,6 +245,13 @@ function openDB() {
           });
         };
       }
+
+      // v8: store de backups automáticos locais — um retrato completo do
+      // banco (todos os perfis) a cada mudança importante.
+      if (!db.objectStoreNames.contains(STORES.backupsLocais)) {
+        const backupsStore = db.createObjectStore(STORES.backupsLocais, { keyPath: 'id', autoIncrement: true });
+        backupsStore.createIndex('criadoEm', 'criadoEm', { unique: false });
+      }
     };
 
     req.onsuccess = (event) => resolve(event.target.result);
@@ -266,6 +280,24 @@ async function tx(storeName, mode, fn) {
     transaction.onerror = () => reject(transaction.error);
   });
 }
+
+// ---------- Backup automático local ----------
+// Sempre que algo muda no banco (exceto o próprio store de backups, pra não
+// entrar em loop), agenda um snapshot completo (todos os perfis) alguns
+// segundos depois — funciona como uma rede de segurança silenciosa.
+let _backupAutoTimer = null;
+const BACKUP_AUTO_DEBOUNCE_MS = 4000;
+const BACKUP_AUTO_MAX_ITENS = 10;
+
+window.addEventListener('ta:mudou', (ev) => {
+  if (ev.detail && ev.detail.storeName === STORES.backupsLocais) return;
+  clearTimeout(_backupAutoTimer);
+  _backupAutoTimer = setTimeout(() => {
+    db.criarBackupLocalAutomatico('alteracao_automatica').catch((err) => {
+      console.error('Falha ao criar backup automático local:', err);
+    });
+  }, BACKUP_AUTO_DEBOUNCE_MS);
+});
 
 const db = {
 
@@ -394,8 +426,84 @@ const db = {
     };
   },
 
+  /** Backup COMPLETO: todos os perfis de uma vez, preservando ids e
+   *  perfilId de cada item. Usado pelos backups automáticos locais (e pode
+   *  ser usado para um backup manual "de tudo", diferente do backup normal
+   *  que exporta só o perfil ativo). */
+  async exportAllRaw() {
+    const [perfis, tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes] = await Promise.all([
+      tx(STORES.perfis, 'readonly', (store) => store.getAll()),
+      tx(STORES.tentativas, 'readonly', (store) => store.getAll()),
+      tx(STORES.editais, 'readonly', (store) => store.getAll()),
+      tx(STORES.simulados, 'readonly', (store) => store.getAll()),
+      tx(STORES.ciclos, 'readonly', (store) => store.getAll()),
+      tx(STORES.cicloMaterias, 'readonly', (store) => store.getAll()),
+      tx(STORES.cicloSessoes, 'readonly', (store) => store.getAll())
+    ]);
+    return {
+      versao: DB_VERSION,
+      tipo: 'completo',
+      exportadoEm: new Date().toISOString(),
+      perfis, tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes
+    };
+  },
+
+  /** Restaura um backup COMPLETO (gerado por exportAllRaw), substituindo
+   *  TODOS os perfis e dados existentes pelos do snapshot, com os mesmos
+   *  ids. Use com cuidado — é uma substituição total do banco. */
+  async importAllRaw(dados) {
+    await Promise.all([
+      tx(STORES.perfis, 'readwrite', (store) => store.clear()),
+      tx(STORES.tentativas, 'readwrite', (store) => store.clear()),
+      tx(STORES.editais, 'readwrite', (store) => store.clear()),
+      tx(STORES.simulados, 'readwrite', (store) => store.clear()),
+      tx(STORES.ciclos, 'readwrite', (store) => store.clear()),
+      tx(STORES.cicloMaterias, 'readwrite', (store) => store.clear()),
+      tx(STORES.cicloSessoes, 'readwrite', (store) => store.clear())
+    ]);
+
+    const restaurar = (storeName, lista) =>
+      Promise.all((lista || []).map(item => tx(storeName, 'readwrite', (store) => store.add(item))));
+
+    await restaurar(STORES.perfis, dados.perfis);
+    await restaurar(STORES.tentativas, dados.tentativas);
+    await restaurar(STORES.editais, dados.editais);
+    await restaurar(STORES.simulados, dados.simulados);
+    await restaurar(STORES.ciclos, dados.ciclos);
+    await restaurar(STORES.cicloMaterias, dados.cicloMaterias);
+    await restaurar(STORES.cicloSessoes, dados.cicloSessoes);
+  },
+
+  /** Cria um snapshot completo (todos os perfis) no store local de backups
+   *  automáticos, e mantém só os BACKUP_AUTO_MAX_ITENS mais recentes. */
+  async criarBackupLocalAutomatico(motivo) {
+    const dados = await db.exportAllRaw();
+    await tx(STORES.backupsLocais, 'readwrite', (store) => store.add({
+      criadoEm: new Date().toISOString(),
+      motivo: motivo || 'auto',
+      dados
+    }));
+
+    const todos = await tx(STORES.backupsLocais, 'readonly', (store) => store.getAll());
+    if (todos.length > BACKUP_AUTO_MAX_ITENS) {
+      const excedentes = todos.sort((a, b) => a.id - b.id).slice(0, todos.length - BACKUP_AUTO_MAX_ITENS);
+      await Promise.all(excedentes.map(b => tx(STORES.backupsLocais, 'readwrite', (store) => store.delete(b.id))));
+    }
+  },
+
+  backupsLocais: {
+    async getAll() {
+      const todos = await tx(STORES.backupsLocais, 'readonly', (store) => store.getAll());
+      return todos.sort((a, b) => new Date(b.criadoEm) - new Date(a.criadoEm));
+    },
+    remove: (id) => tx(STORES.backupsLocais, 'readwrite', (store) => store.delete(id))
+  },
+
   async importAll(data, { substituir = true } = {}) {
     if (substituir) {
+      // Rede de segurança: guarda um retrato de tudo ANTES de qualquer
+      // substituição, sem esperar o debounce do backup automático normal.
+      await db.criarBackupLocalAutomatico('antes_de_importar').catch(() => {});
       await Promise.all([
         db.clear(STORES.tentativas),
         db.clear(STORES.editais),
@@ -476,6 +584,8 @@ const db = {
   },
 
   async zerarTudo() {
+    // Rede de segurança: guarda um retrato de tudo ANTES de zerar.
+    await db.criarBackupLocalAutomatico('antes_de_zerar').catch(() => {});
     await Promise.all([
       db.clear(STORES.tentativas),
       db.clear(STORES.editais),

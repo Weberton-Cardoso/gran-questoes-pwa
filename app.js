@@ -1563,6 +1563,26 @@ function renderConfiguracoes(view) {
       </div>
     </div>
 
+    <div class="card mt-12" id="card-backups-locais">
+      <div class="card-title">Backups automáticos deste aparelho</div>
+      <p class="text-muted" style="font-size:13.5px;margin-top:0;">
+        O app guarda automaticamente um retrato completo (todos os perfis) sempre que algo muda,
+        e também logo antes de importações e sincronizações. Se algo der errado, você pode
+        voltar para um desses pontos no tempo. Restaurar aqui substitui TODOS os perfis e dados
+        atuais neste aparelho.
+      </p>
+      <div id="lista-backups-locais">Carregando...</div>
+    </div>
+
+    <div class="card mt-12" id="card-backups-nuvem" style="display:none;">
+      <div class="card-title">Backups na nuvem</div>
+      <p class="text-muted" style="font-size:13.5px;margin-top:0;">
+        Antes de cada sincronização com a nuvem, uma cópia do estado anterior é guardada aqui.
+        Restaurar aqui substitui os dados do perfil ativo pelos do backup escolhido.
+      </p>
+      <div id="lista-backups-nuvem">Carregando...</div>
+    </div>
+
     <div class="card mt-12">
       <div class="card-title">Consolidar tentativas duplicadas</div>
       <p class="text-muted" style="font-size:13.5px;margin-top:0;">
@@ -1614,6 +1634,9 @@ function renderConfiguracoes(view) {
     fileInput.value = '';
   });
 
+  renderListaBackupsLocais();
+  renderListaBackupsNuvem();
+
   $('#btn-consolidar').addEventListener('click', async () => {
     const grupos = new Map();
     state.tentativas.forEach(t => {
@@ -1662,6 +1685,111 @@ function renderConfiguracoes(view) {
     showToast('Estatísticas zeradas.', 'danger');
     router();
   });
+}
+
+function _formatarDataHoraBR(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return String(iso);
+  return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+const _MOTIVO_BACKUP_LABEL = {
+  alteracao_automatica: 'Alteração no app',
+  antes_de_importar: 'Antes de importar um backup',
+  antes_de_zerar: 'Antes de zerar estatísticas',
+  antes_de_puxar_da_nuvem: 'Antes de sincronizar (baixando da nuvem)',
+  antes_de_restaurar_backup_nuvem: 'Antes de restaurar backup da nuvem',
+  antes_de_enviar: 'Antes de sincronizar (enviando para a nuvem)',
+  auto: 'Automático'
+};
+
+async function renderListaBackupsLocais() {
+  const container = $('#lista-backups-locais');
+  if (!container) return;
+
+  const backups = await db.backupsLocais.getAll();
+  if (!backups.length) {
+    container.innerHTML = '<p class="text-muted" style="font-size:13.5px;">Nenhum backup automático ainda — assim que algo mudar no app, o primeiro será criado.</p>';
+    return;
+  }
+
+  container.innerHTML = backups.map(b => {
+    const totalTentativas = (b.dados?.tentativas || []).length;
+    const totalCiclos = (b.dados?.ciclos || []).length;
+    const motivo = _MOTIVO_BACKUP_LABEL[b.motivo] || b.motivo || 'Automático';
+    return `
+      <div class="flex" style="justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);gap:12px;flex-wrap:wrap;">
+        <div>
+          <div style="font-weight:600;">${_formatarDataHoraBR(b.criadoEm)}</div>
+          <div class="text-muted" style="font-size:12.5px;">${escapeHtml(motivo)} — ${totalTentativas} tentativa(s), ${totalCiclos} ciclo(s)</div>
+        </div>
+        <button class="btn" data-restaurar-local="${b.id}">Restaurar</button>
+      </div>
+    `;
+  }).join('');
+
+  container.querySelectorAll('[data-restaurar-local]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const id = Number(btn.dataset.restaurarLocal);
+      const backup = backups.find(b => b.id === id);
+      if (!backup) return;
+      if (!confirm(`Restaurar este backup de ${_formatarDataHoraBR(backup.criadoEm)}? Isso substitui TODOS os perfis e dados atuais neste aparelho.`)) return;
+      await db.importAllRaw(backup.dados);
+      await reloadState();
+      showToast('Backup restaurado com sucesso.', 'success');
+      router();
+    });
+  });
+}
+
+async function renderListaBackupsNuvem() {
+  const card = $('#card-backups-nuvem');
+  const container = $('#lista-backups-nuvem');
+  if (!card || !container) return;
+  if (typeof cloudSync === 'undefined' || !cloudSync.usuarioAtual) return;
+
+  card.style.display = '';
+  try {
+    const backups = await cloudSync.listarBackupsNuvem();
+    if (!backups.length) {
+      container.innerHTML = '<p class="text-muted" style="font-size:13.5px;">Nenhum backup na nuvem ainda.</p>';
+      return;
+    }
+
+    container.innerHTML = backups.map(b => {
+      const totalTentativas = (b.dados?.tentativas || []).length;
+      const totalCiclos = (b.dados?.ciclos || []).length;
+      const motivo = _MOTIVO_BACKUP_LABEL[b.motivo] || b.motivo || 'Automático';
+      const criadoEm = b.criadoEm && b.criadoEm.toDate ? b.criadoEm.toDate().toISOString() : b.criadoEm;
+      return `
+        <div class="flex" style="justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border);gap:12px;flex-wrap:wrap;">
+          <div>
+            <div style="font-weight:600;">${_formatarDataHoraBR(criadoEm)}</div>
+            <div class="text-muted" style="font-size:12.5px;">${escapeHtml(motivo)} — ${totalTentativas} tentativa(s), ${totalCiclos} ciclo(s) (perfil ativo)</div>
+          </div>
+          <button class="btn" data-restaurar-nuvem="${b.id}">Restaurar</button>
+        </div>
+      `;
+    }).join('');
+
+    container.querySelectorAll('[data-restaurar-nuvem]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.restaurarNuvem;
+        if (!confirm('Restaurar este backup da nuvem? Isso substitui os dados do perfil ativo neste aparelho.')) return;
+        try {
+          await cloudSync.restaurarBackupNuvem(id);
+          await reloadState();
+          showToast('Backup da nuvem restaurado com sucesso.', 'success');
+          router();
+        } catch (err) {
+          showToast('Não foi possível restaurar esse backup.', 'danger');
+        }
+      });
+    });
+  } catch (err) {
+    container.innerHTML = '<p class="text-muted" style="font-size:13.5px;">Não foi possível carregar os backups da nuvem agora.</p>';
+  }
 }
 
 /* ============================================================

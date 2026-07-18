@@ -402,6 +402,7 @@ tbody tr.clickable{ cursor:pointer; }
 }
 .toast.success{ border-left-color:var(--success); }
 .toast.danger{ border-left-color:var(--danger); }
+.toast.warning{ border-left-color:var(--gold); }
 
 /* editais */
 .edital-topic{
