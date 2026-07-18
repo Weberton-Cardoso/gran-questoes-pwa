@@ -40,13 +40,14 @@ const _CORES_MATERIA_CICLO = [
 ];
 
 /** Soma os minutos estudados (db.cicloSessoes) de todas as disciplinas de
- *  um ciclo, agrupados por tipo de estudo. Sessões sem tipo informado
- *  entram no grupo "Não informado". */
-function _tempoPorTipoEstudo(materiasDoCiclo) {
+ *  um ciclo NUM DIA ESPECÍFICO (padrão: hoje), agrupados por tipo de
+ *  estudo. Sessões sem tipo informado entram no grupo "Não informado". */
+function _tempoPorTipoEstudo(materiasDoCiclo, data = todayISO()) {
   const idsMateria = new Set(materiasDoCiclo.map(m => m.id));
   const totais = {};
   for (const s of state.cicloSessoes) {
     if (!idsMateria.has(s.cicloMateriaId)) continue;
+    if (s.data !== data) continue;
     const tipo = s.tipoEstudo || 'Não informado';
     totais[tipo] = (totais[tipo] || 0) + (s.minutos || 0);
   }
@@ -479,30 +480,32 @@ function renderCicloPainelRoute(view, cicloId) {
       const materia = state.cicloMaterias.find(m => m.id === Number(btn.dataset.editarTipo));
       if (!materia) return;
 
-      // Pega a sessão mais recente dessa disciplina para editar o tipo dela.
-      const sessoesDaMateria = state.cicloSessoes
-        .filter(s => s.cicloMateriaId === materia.id)
+      // Só olha/edita sessões de HOJE — nunca mexe em dias passados, pra não
+      // reatribuir minutos que já estavam corretamente contabilizados antes.
+      const hoje = todayISO();
+      const sessoesDeHoje = state.cicloSessoes
+        .filter(s => s.cicloMateriaId === materia.id && s.data === hoje)
         .sort((a, b) => new Date(b.fim || b.data) - new Date(a.fim || a.data));
-      const tipoAtual = sessoesDaMateria[0]?.tipoEstudo || null;
+      const tipoAtual = sessoesDeHoje[0]?.tipoEstudo || null;
 
       const lista = TIPOS_ESTUDO_CICLO.map((t, i) => `${i + 1}) ${t}`).join('\n');
       const resposta = prompt(
-        `Tipo de estudo atual: ${tipoAtual || 'não informado'}\n\n` +
-        `Digite o número do novo tipo para "${materia.nome}" (ou 0 para remover):\n${lista}`,
+        `Tipo de estudo de HOJE em "${materia.nome}": ${tipoAtual || 'não informado'}\n\n` +
+        `Digite o número do novo tipo (ou 0 para remover):\n${lista}`,
         ''
       );
       if (resposta === null || resposta.trim() === '') return;
       const indice = Number(resposta.trim()) - 1;
       const novoTipo = TIPOS_ESTUDO_CICLO[indice] || null;
 
-      if (sessoesDaMateria[0]) {
-        // Atualiza a sessão mais recente já registrada.
-        await db.cicloSessoes.update({ ...sessoesDaMateria[0], tipoEstudo: novoTipo });
+      if (sessoesDeHoje[0]) {
+        // Atualiza a sessão de HOJE mais recente — dias anteriores não são tocados.
+        await db.cicloSessoes.update({ ...sessoesDeHoje[0], tipoEstudo: novoTipo });
       } else {
-        // Ainda não existe nenhuma sessão para essa disciplina — cria uma
-        // marcação de 0 minutos só para guardar o tipo escolhido.
+        // Ainda não existe nenhuma sessão de hoje para essa disciplina — cria
+        // uma marcação de 0 minutos só para guardar o tipo escolhido.
         await db.cicloSessoes.add({
-          cicloMateriaId: materia.id, nome: materia.nome, data: todayISO(),
+          cicloMateriaId: materia.id, nome: materia.nome, data: hoje,
           minutos: 0, inicio: new Date().toISOString(), fim: new Date().toISOString(),
           tipoEstudo: novoTipo
         });
@@ -515,17 +518,17 @@ function renderCicloPainelRoute(view, cicloId) {
 }
 
 /** Card com o total de minutos estudados por tipo (PDF, Vídeo, Exercícios…)
- *  dentro deste ciclo, com um gráfico de rosca + lista com percentuais. */
+ *  dentro deste ciclo NO DIA DE HOJE, com um gráfico de rosca + lista com percentuais. */
 function _renderCardTempoPorTipo(materiasDoCiclo) {
   const container = $('#card-tempo-por-tipo');
   if (!container) return;
 
-  const totais = _tempoPorTipoEstudo(materiasDoCiclo);
+  const totais = _tempoPorTipoEstudo(materiasDoCiclo, todayISO());
   if (!totais.length) {
     container.innerHTML = `
-      <div class="card-title">Tempo por tipo de estudo</div>
+      <div class="card-title">Tempo por tipo de estudo (hoje)</div>
       <p class="text-muted" style="font-size:13.5px;margin-top:0;">
-        Ainda não há sessões com tipo de estudo registrado neste ciclo. Escolha um tipo ao concluir
+        Ainda não há sessões de hoje com tipo de estudo registrado. Escolha um tipo ao concluir
         uma sessão, no ajuste manual de tempo, ou no botão "Editar tipo" de cada disciplina.
       </p>
     `;
@@ -534,7 +537,7 @@ function _renderCardTempoPorTipo(materiasDoCiclo) {
 
   const totalGeral = totais.reduce((soma, [, minutos]) => soma + minutos, 0);
   container.innerHTML = `
-    <div class="card-title">Tempo por tipo de estudo</div>
+    <div class="card-title">Tempo por tipo de estudo (hoje)</div>
     <div class="chart-wrap" style="max-width:280px;margin:8px auto;"><canvas id="chart-tipo-estudo"></canvas></div>
     <div class="mt-8">
       ${totais.map(([tipo, minutos], i) => `
@@ -608,7 +611,7 @@ function _renderCicloLinhaMateria(m, materiasDoCiclo, minutosCicloTotal, sessaoA
           : `<button class="btn btn-sm" data-iniciar="${m.id}" ${sessaoAtiva ? 'disabled' : ''}>Iniciar</button>
              <button class="btn btn-sm btn-ghost" data-manual="${m.id}">Editar tempo</button>
              <button class="btn btn-sm btn-ghost" data-manual-total="${m.id}" title="Corrigir o valor exato, sem somar">Corrigir total</button>
-             <button class="btn btn-sm btn-ghost" data-editar-tipo="${m.id}" title="Marcar/corrigir o tipo de estudo da sessão mais recente">Editar tipo</button>`
+             <button class="btn btn-sm btn-ghost" data-editar-tipo="${m.id}" title="Marcar/corrigir o tipo de estudo de HOJE, sem mexer em dias passados">Editar tipo</button>`
         }
       </div>
     </div>
