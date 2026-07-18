@@ -25,6 +25,28 @@ const TIPOS_ESTUDO_CICLO = [
   'Discursivas', 'Prática Forense', 'Fase Oral', 'Flashcards', 'Súmula', 'Outros'
 ];
 
+const _CORES_TIPO_ESTUDO = [
+  '#E8B14D', '#60A5FA', '#34D399', '#F87171', '#A78BFA', '#F472B6',
+  '#38BDF8', '#FB923C', '#4ADE80', '#C084FC', '#FBBF24', '#22D3EE',
+  '#F97316', '#84CC16', '#EC4899', '#10B981', '#94A3B8'
+];
+
+/** Soma os minutos estudados (db.cicloSessoes) de todas as disciplinas de
+ *  um ciclo, agrupados por tipo de estudo. Sessões sem tipo informado
+ *  entram no grupo "Não informado". */
+function _tempoPorTipoEstudo(materiasDoCiclo) {
+  const idsMateria = new Set(materiasDoCiclo.map(m => m.id));
+  const totais = {};
+  for (const s of state.cicloSessoes) {
+    if (!idsMateria.has(s.cicloMateriaId)) continue;
+    const tipo = s.tipoEstudo || 'Não informado';
+    totais[tipo] = (totais[tipo] || 0) + (s.minutos || 0);
+  }
+  return Object.entries(totais)
+    .filter(([, minutos]) => minutos > 0)
+    .sort((a, b) => b[1] - a[1]);
+}
+
 function _perguntarTipoEstudo() {
   const lista = TIPOS_ESTUDO_CICLO.map((t, i) => `${i + 1}) ${t}`).join('\n');
   const resposta = prompt(
@@ -324,9 +346,13 @@ function renderCicloPainelRoute(view, cicloId) {
         ${materias.map(m => _renderCicloLinhaMateria(m, materias, totalMeta, sessaoAtiva)).join('')}
       </div>
     </div>
+
+    <div class="card mt-16" id="card-tempo-por-tipo"></div>
   `;
 
   $('#btn-editar-ciclo').addEventListener('click', () => renderCicloSetup(view, ciclo));
+
+  _renderCardTempoPorTipo(materias);
 
   $('#btn-reiniciar-ciclo').addEventListener('click', async () => {
     if (!confirm(`Reiniciar o ciclo "${ciclo.nome}" agora? O tempo já estudado em cada disciplina volta a zero e isso NÃO conta como uma volta completa. As disciplinas e pesos continuam os mesmos.`)) return;
@@ -439,6 +465,87 @@ function renderCicloPainelRoute(view, cicloId) {
       renderCicloPainelRoute(view, cicloId);
     });
   });
+
+  $$('[data-editar-tipo]', view).forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const materia = state.cicloMaterias.find(m => m.id === Number(btn.dataset.editarTipo));
+      if (!materia) return;
+
+      // Pega a sessão mais recente dessa disciplina para editar o tipo dela.
+      const sessoesDaMateria = state.cicloSessoes
+        .filter(s => s.cicloMateriaId === materia.id)
+        .sort((a, b) => new Date(b.fim || b.data) - new Date(a.fim || a.data));
+      const tipoAtual = sessoesDaMateria[0]?.tipoEstudo || null;
+
+      const lista = TIPOS_ESTUDO_CICLO.map((t, i) => `${i + 1}) ${t}`).join('\n');
+      const resposta = prompt(
+        `Tipo de estudo atual: ${tipoAtual || 'não informado'}\n\n` +
+        `Digite o número do novo tipo para "${materia.nome}" (ou 0 para remover):\n${lista}`,
+        ''
+      );
+      if (resposta === null || resposta.trim() === '') return;
+      const indice = Number(resposta.trim()) - 1;
+      const novoTipo = TIPOS_ESTUDO_CICLO[indice] || null;
+
+      if (sessoesDaMateria[0]) {
+        // Atualiza a sessão mais recente já registrada.
+        await db.cicloSessoes.update({ ...sessoesDaMateria[0], tipoEstudo: novoTipo });
+      } else {
+        // Ainda não existe nenhuma sessão para essa disciplina — cria uma
+        // marcação de 0 minutos só para guardar o tipo escolhido.
+        await db.cicloSessoes.add({
+          cicloMateriaId: materia.id, nome: materia.nome, data: todayISO(),
+          minutos: 0, inicio: new Date().toISOString(), fim: new Date().toISOString(),
+          tipoEstudo: novoTipo
+        });
+      }
+      await reloadState();
+      showToast(`Tipo de estudo de ${materia.nome} atualizado.`, 'success');
+      renderCicloPainelRoute(view, cicloId);
+    });
+  });
+}
+
+/** Card com o total de minutos estudados por tipo (PDF, Vídeo, Exercícios…)
+ *  dentro deste ciclo, com um gráfico de rosca + lista com percentuais. */
+function _renderCardTempoPorTipo(materiasDoCiclo) {
+  const container = $('#card-tempo-por-tipo');
+  if (!container) return;
+
+  const totais = _tempoPorTipoEstudo(materiasDoCiclo);
+  if (!totais.length) {
+    container.innerHTML = `
+      <div class="card-title">Tempo por tipo de estudo</div>
+      <p class="text-muted" style="font-size:13.5px;margin-top:0;">
+        Ainda não há sessões com tipo de estudo registrado neste ciclo. Escolha um tipo ao concluir
+        uma sessão, no ajuste manual de tempo, ou no botão "Editar tipo" de cada disciplina.
+      </p>
+    `;
+    return;
+  }
+
+  const totalGeral = totais.reduce((soma, [, minutos]) => soma + minutos, 0);
+  container.innerHTML = `
+    <div class="card-title">Tempo por tipo de estudo</div>
+    <div class="chart-wrap" style="max-width:280px;margin:8px auto;"><canvas id="chart-tipo-estudo"></canvas></div>
+    <div class="mt-8">
+      ${totais.map(([tipo, minutos], i) => `
+        <div class="flex" style="justify-content:space-between;font-size:13px;padding:5px 0;border-bottom:1px solid var(--border);">
+          <span>
+            <span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${_CORES_TIPO_ESTUDO[i % _CORES_TIPO_ESTUDO.length]};margin-right:7px;"></span>
+            ${escapeHtml(tipo)}
+          </span>
+          <span class="text-muted">${_formatarMinutos(minutos)} · ${fmtPct((minutos / totalGeral) * 100)}</span>
+        </div>
+      `).join('')}
+    </div>
+  `;
+
+  renderStatusDoughnutChart('chart-tipo-estudo', {
+    labels: totais.map(([tipo]) => tipo),
+    values: totais.map(([, minutos]) => Math.round(minutos)),
+    colors: totais.map((_, i) => _CORES_TIPO_ESTUDO[i % _CORES_TIPO_ESTUDO.length])
+  });
 }
 
 function _renderCicloSessaoAtivaCard(sessaoAtiva) {
@@ -488,7 +595,8 @@ function _renderCicloLinhaMateria(m, materiasDoCiclo, minutosCicloTotal, sessaoA
           ? `<span class="text-muted" style="font-size:12.5px;align-self:center;">Em andamento…</span>`
           : `<button class="btn btn-sm" data-iniciar="${m.id}" ${sessaoAtiva ? 'disabled' : ''}>Iniciar</button>
              <button class="btn btn-sm btn-ghost" data-manual="${m.id}">Editar tempo</button>
-             <button class="btn btn-sm btn-ghost" data-manual-total="${m.id}" title="Corrigir o valor exato, sem somar">Corrigir total</button>`
+             <button class="btn btn-sm btn-ghost" data-manual-total="${m.id}" title="Corrigir o valor exato, sem somar">Corrigir total</button>
+             <button class="btn btn-sm btn-ghost" data-editar-tipo="${m.id}" title="Marcar/corrigir o tipo de estudo da sessão mais recente">Editar tipo</button>`
         }
       </div>
     </div>
