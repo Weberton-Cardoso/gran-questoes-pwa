@@ -361,7 +361,38 @@ function renderCicloPainelRoute(view, cicloId) {
       const materia = state.cicloMaterias.find(m => m.id === Number(btn.dataset.manual));
       if (!materia) return;
       const resposta = prompt(
-        `Tempo TOTAL já estudado em "${materia.nome}" nesta volta (em minutos):`,
+        `Quantos minutos você quer ADICIONAR ao tempo já estudado em "${materia.nome}"?\n` +
+        `(Já tem ${_formatarMinutos(materia.minutosFeitos)} registrado — o app soma automaticamente. ` +
+        `Use um número negativo se precisar corrigir/subtrair.)`,
+        ''
+      );
+      if (resposta === null || resposta.trim() === '') return;
+      const minutosAdicionados = Number(resposta.replace(',', '.'));
+      if (isNaN(minutosAdicionados)) { showToast('Digite um número válido de minutos.', 'error'); return; }
+
+      const novoTotal = Math.max(0, materia.minutosFeitos + minutosAdicionados);
+      const diferenca = novoTotal - materia.minutosFeitos;
+      materia.minutosFeitos = novoTotal;
+      await db.cicloMaterias.update(materia);
+      if (diferenca !== 0) {
+        await db.cicloSessoes.add({
+          cicloMateriaId: materia.id, nome: materia.nome, data: todayISO(),
+          minutos: diferenca, inicio: new Date().toISOString(), fim: new Date().toISOString(),
+          ajusteManual: true
+        });
+      }
+      await reloadState();
+      showToast(`Tempo de ${materia.nome} agora é ${_formatarMinutos(novoTotal)}.`, 'success');
+      renderCicloPainelRoute(view, cicloId);
+    });
+  });
+
+  $$('[data-manual-total]', view).forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const materia = state.cicloMaterias.find(m => m.id === Number(btn.dataset.manualTotal));
+      if (!materia) return;
+      const resposta = prompt(
+        `Corrigir o tempo TOTAL exato já estudado em "${materia.nome}" (em minutos):`,
         String(Math.round(materia.minutosFeitos))
       );
       if (resposta === null) return;
@@ -379,7 +410,7 @@ function renderCicloPainelRoute(view, cicloId) {
         });
       }
       await reloadState();
-      showToast(`Tempo de ${materia.nome} ajustado para ${_formatarMinutos(novoTotal)}.`, 'success');
+      showToast(`Tempo de ${materia.nome} corrigido para ${_formatarMinutos(novoTotal)}.`, 'success');
       renderCicloPainelRoute(view, cicloId);
     });
   });
@@ -424,7 +455,8 @@ function _renderCicloLinhaMateria(m, materiasDoCiclo, minutosCicloTotal, sessaoA
         ${emAndamento
           ? `<span class="text-muted" style="font-size:12.5px;align-self:center;">Em andamento…</span>`
           : `<button class="btn btn-sm" data-iniciar="${m.id}" ${sessaoAtiva ? 'disabled' : ''}>Iniciar</button>
-             <button class="btn btn-sm btn-ghost" data-manual="${m.id}">Editar tempo</button>`
+             <button class="btn btn-sm btn-ghost" data-manual="${m.id}">Editar tempo</button>
+             <button class="btn btn-sm btn-ghost" data-manual-total="${m.id}" title="Corrigir o valor exato, sem somar">Corrigir total</button>`
         }
       </div>
     </div>
