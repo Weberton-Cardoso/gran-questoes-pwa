@@ -10,12 +10,6 @@
  * 4. Cole este arquivo inteiro e aperte Enter.
  * 5. Aguarde a mensagem de conclusão no console, depois dê F5 na página.
  *
- * IMPORTANTE — corte por data:
- * Você começou a lançar tentativas manualmente no app em 11/06/2026.
- * Para não duplicar com o que você já lançou à mão, este script importa
- * SÓ os meses ANTERIORES a junho/2026 (ou seja, até 2026-05). Os blocos
- * de 2026-06 e 2026-07 do JSON são ignorados de propósito.
- *
  * Este script só ADICIONA registros novos (db.tentativas.add). Ele nunca
  * limpa, atualiza ou remove nada que já existe. Depois de rodar uma vez,
  * pode descartar este arquivo — não precisa deixá-lo no projeto.
@@ -1185,22 +1179,10 @@
     return `${yyyy}-${mm}-${dd}`;
   }
 
-  // Junho/2026 entra normalmente (mesmo com sobreposição parcial a partir do
-  // dia 11, por decisão do usuário). Só julho/2026 em diante é pulado, por já
-  // estar totalmente coberto pelos lançamentos manuais no app.
-  const MES_CORTE = '2026-07';
-
   let inseridos = 0;
   let ignorados = 0;
-  let pulados = 0;
 
   for (const bloco of HISTORICO.dados_mensais || []) {
-    if (bloco.mes >= MES_CORTE) {
-      console.log(`⏭️ Pulando ${bloco.mes} (sobreposição com lançamentos manuais no app).`);
-      pulados++;
-      continue;
-    }
-
     const dataFim = parseDataFim(bloco.periodo);
     if (!dataFim) {
       console.warn('⚠️ Não consegui interpretar o período, pulando bloco:', bloco.mes);
@@ -1239,6 +1221,6 @@
     }
   }
 
-  console.log(`✅ Migração concluída: ${inseridos} registro(s) adicionados.${ignorados ? ` (${ignorados} ignorado(s) por estarem vazios/incompletos)` : ''}${pulados ? ` (${pulados} mês(es) pulado(s) por sobreposição: a partir de ${MES_CORTE})` : ''}`);
+  console.log(`✅ Migração concluída: ${inseridos} registro(s) adicionados.${ignorados ? ` (${ignorados} ignorado(s) por estarem vazios/incompletos)` : ''}`);
   console.log('Dê F5 na página para ver os dados atualizados na Dashboard, gráficos e Estatísticas.');
 })();
