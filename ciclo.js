@@ -394,6 +394,8 @@ function renderCicloPainelRoute(view, cicloId) {
       ${todasConcluidas ? `<button class="btn btn-primary mt-12" id="btn-fechar-ciclo">🎉 Fechar ciclo e começar nova volta</button>` : ''}
     </div>
 
+    <div class="card mb-16" id="card-tempo-por-tipo"></div>
+
     ${sessaoAtivaEhDesteCiclo ? _renderCicloSessaoAtivaCard(sessaoAtiva) : ''}
 
     <div class="card">
@@ -402,8 +404,6 @@ function renderCicloPainelRoute(view, cicloId) {
         ${materias.map((m, i) => _renderCicloLinhaMateria(m, materias, totalMeta, sessaoAtiva, i)).join('')}
       </div>
     </div>
-
-    <div class="card mt-16" id="card-tempo-por-tipo"></div>
   `;
 
   $('#btn-editar-ciclo').addEventListener('click', () => renderCicloSetup(view, ciclo));
