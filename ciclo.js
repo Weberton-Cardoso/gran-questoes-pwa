@@ -405,6 +405,10 @@ function renderCicloPainelRoute(view, cicloId) {
     if (selTipo) selTipo.addEventListener('change', () => {
       settings.cicloSessaoAtiva = { ...settings.cicloSessaoAtiva, tipoEstudo: selTipo.value || null };
     });
+    const inputTopico = $('#ciclo-topico-estudo');
+    if (inputTopico) inputTopico.addEventListener('change', () => {
+      settings.cicloSessaoAtiva = { ...settings.cicloSessaoAtiva, topico: inputTopico.value.trim() || null };
+    });
   }
 
   $$('[data-iniciar]', view).forEach(btn => {
@@ -432,13 +436,14 @@ function renderCicloPainelRoute(view, cicloId) {
       const novoTotal = Math.max(0, materia.minutosFeitos + minutosAdicionados);
       const diferenca = novoTotal - materia.minutosFeitos;
       const tipoEstudo = diferenca !== 0 ? _perguntarTipoEstudo() : null;
+      const topico = diferenca !== 0 ? (prompt(`Tópico/assunto estudado em "${materia.nome}" (opcional):`, '') || '').trim() || null : null;
       materia.minutosFeitos = novoTotal;
       await db.cicloMaterias.update(materia);
       if (diferenca !== 0) {
         await db.cicloSessoes.add({
           cicloMateriaId: materia.id, nome: materia.nome, data: todayISO(),
           minutos: diferenca, inicio: new Date().toISOString(), fim: new Date().toISOString(),
-          ajusteManual: true, tipoEstudo
+          ajusteManual: true, tipoEstudo, topico
         });
       }
       await reloadState();
@@ -515,6 +520,40 @@ function renderCicloPainelRoute(view, cicloId) {
       renderCicloPainelRoute(view, cicloId);
     });
   });
+
+  $$('[data-editar-topico]', view).forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const materia = state.cicloMaterias.find(m => m.id === Number(btn.dataset.editarTopico));
+      if (!materia) return;
+
+      // Igual ao "Editar tipo": só olha/edita a sessão de HOJE, nunca dias passados.
+      const hoje = todayISO();
+      const sessoesDeHoje = state.cicloSessoes
+        .filter(s => s.cicloMateriaId === materia.id && s.data === hoje)
+        .sort((a, b) => new Date(b.fim || b.data) - new Date(a.fim || a.data));
+      const topicoAtual = sessoesDeHoje[0]?.topico || '';
+
+      const resposta = prompt(
+        `Tópico/assunto de HOJE em "${materia.nome}" (deixe em branco para remover):`,
+        topicoAtual
+      );
+      if (resposta === null) return;
+      const novoTopico = resposta.trim() || null;
+
+      if (sessoesDeHoje[0]) {
+        await db.cicloSessoes.update({ ...sessoesDeHoje[0], topico: novoTopico });
+      } else {
+        await db.cicloSessoes.add({
+          cicloMateriaId: materia.id, nome: materia.nome, data: hoje,
+          minutos: 0, inicio: new Date().toISOString(), fim: new Date().toISOString(),
+          topico: novoTopico
+        });
+      }
+      await reloadState();
+      showToast(`Tópico de ${materia.nome} atualizado.`, 'success');
+      renderCicloPainelRoute(view, cicloId);
+    });
+  });
 }
 
 /** Card com o total de minutos estudados por tipo (PDF, Vídeo, Exercícios…)
@@ -574,6 +613,10 @@ function _renderCicloSessaoAtivaCard(sessaoAtiva) {
           ${TIPOS_ESTUDO_CICLO.map(t => `<option value="${escapeHtml(t)}" ${sessaoAtiva.tipoEstudo === t ? 'selected' : ''}>${escapeHtml(t)}</option>`).join('')}
         </select>
       </div>
+      <div class="form-row mt-8" style="max-width:260px;margin-left:auto;margin-right:auto;">
+        <label>Tópico/assunto estudado (opcional)</label>
+        <input type="text" id="ciclo-topico-estudo" placeholder="Ex: Atos administrativos" value="${escapeHtml(sessaoAtiva.topico || '')}">
+      </div>
       <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
         ${pausado
           ? `<button class="btn btn-primary" id="btn-retomar-sessao">Retomar</button>`
@@ -611,7 +654,8 @@ function _renderCicloLinhaMateria(m, materiasDoCiclo, minutosCicloTotal, sessaoA
           : `<button class="btn btn-sm" data-iniciar="${m.id}" ${sessaoAtiva ? 'disabled' : ''}>Iniciar</button>
              <button class="btn btn-sm btn-ghost" data-manual="${m.id}">Editar tempo</button>
              <button class="btn btn-sm btn-ghost" data-manual-total="${m.id}" title="Corrigir o valor exato, sem somar">Corrigir total</button>
-             <button class="btn btn-sm btn-ghost" data-editar-tipo="${m.id}" title="Marcar/corrigir o tipo de estudo de HOJE, sem mexer em dias passados">Editar tipo</button>`
+             <button class="btn btn-sm btn-ghost" data-editar-tipo="${m.id}" title="Marcar/corrigir o tipo de estudo de HOJE, sem mexer em dias passados">Editar tipo</button>
+             <button class="btn btn-sm btn-ghost" data-editar-topico="${m.id}" title="Marcar/corrigir o tópico estudado HOJE, sem mexer em dias passados">Editar tópico</button>`
         }
       </div>
     </div>
@@ -662,7 +706,7 @@ async function _concluirSessaoCiclo(view, cicloId) {
     await db.cicloSessoes.add({
       cicloMateriaId: materia.id, nome: materia.nome, data: todayISO(),
       minutos, inicio: new Date(sessaoAtiva.inicio).toISOString(), fim: new Date().toISOString(),
-      tipoEstudo: sessaoAtiva.tipoEstudo || null
+      tipoEstudo: sessaoAtiva.tipoEstudo || null, topico: sessaoAtiva.topico || null
     });
   }
   settings.cicloSessaoAtiva = null;
