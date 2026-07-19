@@ -289,8 +289,21 @@ let _backupAutoTimer = null;
 const BACKUP_AUTO_DEBOUNCE_MS = 4000;
 const BACKUP_AUTO_MAX_ITENS = 10;
 
+// Chave no localStorage com o instante (ISO) da última alteração local —
+// usada pelo cloud-sync.js pra nunca sobrescrever dados locais mais novos
+// com uma cópia da nuvem mais antiga (ex.: se o envio pra nuvem ainda não
+// tinha terminado quando a página foi recarregada por causa de um deploy).
+const CHAVE_ULTIMA_ALTERACAO_LOCAL = 'ta_ultima_alteracao_local';
+
 window.addEventListener('ta:mudou', (ev) => {
   if (ev.detail && ev.detail.storeName === STORES.backupsLocais) return;
+
+  try {
+    localStorage.setItem(CHAVE_ULTIMA_ALTERACAO_LOCAL, new Date().toISOString());
+  } catch (err) {
+    console.warn('Não foi possível registrar o horário da última alteração local:', err);
+  }
+
   clearTimeout(_backupAutoTimer);
   _backupAutoTimer = setTimeout(() => {
     db.criarBackupLocalAutomatico('alteracao_automatica').catch((err) => {
@@ -410,6 +423,17 @@ const db = {
   },
 
   // ---------- Backup ----------
+  /** Instante (ISO) da última alteração local conhecida — usado pelo
+   *  cloud-sync.js para decidir com segurança qual lado (local ou nuvem)
+   *  está mais atualizado antes de sobrescrever qualquer um dos dois. */
+  getUltimaAlteracaoLocal() {
+    try {
+      return localStorage.getItem(CHAVE_ULTIMA_ALTERACAO_LOCAL) || null;
+    } catch {
+      return null;
+    }
+  },
+
   async exportAll() {
     const [tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes] = await Promise.all([
       db.getAll(STORES.tentativas),
@@ -422,6 +446,7 @@ const db = {
     return {
       versao: DB_VERSION,
       exportadoEm: new Date().toISOString(),
+      alteradoEm: db.getUltimaAlteracaoLocal(),
       tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes
     };
   },

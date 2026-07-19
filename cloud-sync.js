@@ -71,8 +71,19 @@ const cloudSync = {
     window.addEventListener('ta:mudou', () => {
       if (this._ignorarProximosEventos) return;
       if (!this.usuarioAtual) return;
+      this._pendente = true;
       this._agendarEnvio();
     });
+
+    // Reforço extra: se a página for escondida/recarregada (ex.: logo após
+    // um deploy) antes do envio programado terminar, manda na hora em vez
+    // de esperar o atraso de 1,5s — reduz a chance de um reload acontecer
+    // no meio do caminho e deixar a nuvem desatualizada.
+    const flush = () => { if (this._pendente) this._enviarImediatamente(); };
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') flush();
+    });
+    window.addEventListener('pagehide', flush);
   },
 
   async entrarComGoogle() {
@@ -93,7 +104,14 @@ const cloudSync = {
    *  para agrupar várias mudanças seguidas em um único envio. */
   _agendarEnvio() {
     clearTimeout(this._pushTimer);
-    this._pushTimer = setTimeout(() => this._enviarParaNuvem(), 1500);
+    this._pushTimer = setTimeout(() => this._enviarImediatamente(), 1500);
+  },
+
+  /** Dispara o envio agora mesmo, cancelando qualquer atraso programado. */
+  _enviarImediatamente() {
+    clearTimeout(this._pushTimer);
+    this._pendente = false;
+    this._enviarParaNuvem();
   },
 
   /** Soma quantos itens (tentativas + editais + simulados + ciclos +
@@ -196,6 +214,21 @@ const cloudSync = {
       if (totalNuvem === 0 && totalLocalAtual > 0) {
         console.warn('[cloud-sync] Sincronização abortada: a nuvem está vazia, mas este aparelho tem dados. Preservando os dados locais.');
         showToast('Sincronização pulada: a nuvem está vazia. Seus dados locais foram preservados.', 'warning');
+        return;
+      }
+
+      // Trava por horário: se o dispositivo tem uma alteração local mais
+      // recente do que a última coisa que a nuvem recebeu (ex.: o envio
+      // anterior não deu tempo de terminar antes da página recarregar,
+      // como acontece logo após um deploy), NÃO baixa da nuvem — isso
+      // evitaria apagar dados novos que ainda não subiram. Só pula essa
+      // checagem se algum dos dois lados não tiver um horário registrado
+      // (dado antigo, de antes dessa proteção existir).
+      const alteracaoLocal = db.getUltimaAlteracaoLocal();
+      const alteracaoNuvem = dadosNuvem.alteradoEm;
+      if (alteracaoLocal && alteracaoNuvem && new Date(alteracaoLocal) > new Date(alteracaoNuvem)) {
+        console.warn('[cloud-sync] Sincronização (baixar) pulada: os dados locais são mais recentes que os da nuvem. Enviando o local para a nuvem em vez de sobrescrevê-lo.');
+        await this._enviarParaNuvem();
         return;
       }
 
