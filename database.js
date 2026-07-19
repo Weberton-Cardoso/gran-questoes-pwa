@@ -595,15 +595,27 @@ const db = {
       });
     }
 
+    // Mapa do id antigo de cada disciplina do ciclo -> novo id gerado.
+    // CRÍTICO: sem isso, toda sessão (db.cicloSessoes) perde a ligação com
+    // a disciplina certa a cada sincronização/importação, porque os ids
+    // das disciplinas são recriados do zero a cada vez.
+    const mapaMateriaId = {};
     for (const m of listaCicloMaterias) {
       const { id, cicloId, perfilId, ...rest } = m;
       rest.cicloId = cicloId != null && mapaCicloId[cicloId] != null
         ? mapaCicloId[cicloId]
         : (cicloUnicoIdAntigo ?? cicloId);
-      await db.add(STORES.cicloMaterias, rest);
+      const novoId = await db.add(STORES.cicloMaterias, rest);
+      if (id != null) mapaMateriaId[id] = novoId;
     }
     for (const s of listaCicloSessoes) {
-      const { id, perfilId, ...rest } = s;
+      const { id, perfilId, cicloMateriaId, ...rest } = s;
+      // Se a disciplina referenciada não existir mais no mapa (ex.: foi
+      // removida do ciclo), descarta a sessão órfã em vez de gravar um
+      // link quebrado que nunca mais vai aparecer em lugar nenhum.
+      const novoCicloMateriaId = cicloMateriaId != null ? mapaMateriaId[cicloMateriaId] : null;
+      if (novoCicloMateriaId == null) continue;
+      rest.cicloMateriaId = novoCicloMateriaId;
       await db.add(STORES.cicloSessoes, rest);
     }
   },
