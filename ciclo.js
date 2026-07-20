@@ -401,7 +401,7 @@ function renderCicloPainelRoute(view, cicloId) {
     <div class="card">
       <div class="card-title">Disciplinas deste ciclo</div>
       <div class="ciclo-lista mt-12">
-        ${materias.map((m, i) => _renderCicloLinhaMateria(m, materias, totalMeta, sessaoAtiva, i)).join('')}
+        ${materias.map((m, i) => _renderCicloLinhaMateria(m, materias, totalMeta, sessaoAtiva, i, ciclo.nome)).join('')}
       </div>
     </div>
   `;
@@ -661,7 +661,7 @@ function _renderCicloSessaoAtivaCard(sessaoAtiva) {
   `;
 }
 
-function _renderCicloLinhaMateria(m, materiasDoCiclo, minutosCicloTotal, sessaoAtiva, indice = 0) {
+function _renderCicloLinhaMateria(m, materiasDoCiclo, minutosCicloTotal, sessaoAtiva, indice = 0, nomeConcurso = '') {
   const meta = _cicloMetaMinutos(m, materiasDoCiclo, minutosCicloTotal);
   const pct = meta ? Math.min(100, (m.minutosFeitos / meta) * 100) : 0;
   const concluida = meta > 0 && m.minutosFeitos >= meta;
@@ -681,6 +681,19 @@ function _renderCicloLinhaMateria(m, materiasDoCiclo, minutosCicloTotal, sessaoA
   const tempoHistoricoSessoes = sessoesComTempo.reduce((soma, s) => soma + s.minutos, 0);
   const jaEstudou = vezesVista > 0 || m.minutosFeitos > 0;
 
+  // Taxa de acerto geral dessa disciplina, casando pelo nome com as
+  // tentativas já registradas — e SÓ dentro do concurso deste ciclo (ex.:
+  // "TCDF"), pra não misturar com registros de outros concursos ou com o
+  // histórico importado em massa do Gran Questões (que não tem concurso).
+  const norm = (s) => (s || '').trim().toLowerCase();
+  const tentativasDaMateria = state.tentativas.filter(t =>
+    norm(t.disciplina) === norm(m.nome) &&
+    (nomeConcurso ? norm(t.concurso) === norm(nomeConcurso) : true)
+  );
+  const totalQuestoesMateria = tentativasDaMateria.reduce((soma, t) => soma + (t.numQuestoes || 0), 0);
+  const totalAcertosMateria = tentativasDaMateria.reduce((soma, t) => soma + (t.acertos || 0), 0);
+  const taxaMateria = totalQuestoesMateria > 0 ? (totalAcertosMateria / totalQuestoesMateria) * 100 : null;
+
   return `
     <div class="ciclo-materia-row ${emAndamento ? 'ativa' : ''}" style="border-left:4px solid ${cor};">
       <div class="ciclo-materia-topo">
@@ -696,6 +709,12 @@ function _renderCicloLinhaMateria(m, materiasDoCiclo, minutosCicloTotal, sessaoA
           : jaEstudou
             ? `<span class="text-muted">👁 Já estudada · ${_formatarMinutos(m.minutosFeitos)} registrados nesta volta</span>`
             : `<span style="color:var(--danger);font-weight:600;">⚠ Ainda não estudada nenhuma vez</span>`
+        }
+      </div>
+      <div class="mt-4" style="font-size:12px;">
+        ${taxaMateria !== null
+          ? `<span class="text-muted">🎯 Taxa de acertos${nomeConcurso ? ` em ${escapeHtml(nomeConcurso)}` : ''}: <strong style="color:var(--gold);">${fmtPct(taxaMateria)}</strong> (${totalAcertosMateria}/${totalQuestoesMateria} questões)</span>`
+          : `<span class="text-muted">🎯 Nenhuma questão registrada ainda${nomeConcurso ? ` para o concurso ${escapeHtml(nomeConcurso)}` : ''} nessa disciplina</span>`
         }
       </div>
       <div class="pct-bar-wrap mt-8" style="min-width:auto;">
