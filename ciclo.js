@@ -670,11 +670,16 @@ function _renderCicloLinhaMateria(m, materiasDoCiclo, minutosCicloTotal, sessaoA
 
   // Conta quantas vezes essa disciplina já foi estudada de verdade (em
   // qualquer volta do ciclo, não só a atual — por isso usa o histórico de
-  // sessões, já que minutosFeitos zera a cada volta nova).
+  // sessões, já que minutosFeitos zera a cada volta nova). Como fallback,
+  // também considera o minutosFeitos da volta atual — assim, mesmo que as
+  // sessões antigas ainda estejam com o vínculo quebrado (bug já corrigido,
+  // mas que precisa do reparo em Configurações pra dados antigos), a
+  // disciplina não aparece errado como "nunca estudada" se já tem tempo
+  // registrado.
   const sessoesComTempo = state.cicloSessoes.filter(s => s.cicloMateriaId === m.id && (s.minutos || 0) > 0);
   const vezesVista = sessoesComTempo.length;
-  const tempoHistoricoTotal = sessoesComTempo.reduce((soma, s) => soma + s.minutos, 0);
-  const jaEstudou = vezesVista > 0;
+  const tempoHistoricoSessoes = sessoesComTempo.reduce((soma, s) => soma + s.minutos, 0);
+  const jaEstudou = vezesVista > 0 || m.minutosFeitos > 0;
 
   return `
     <div class="ciclo-materia-row ${emAndamento ? 'ativa' : ''}" style="border-left:4px solid ${cor};">
@@ -686,9 +691,11 @@ function _renderCicloLinhaMateria(m, materiasDoCiclo, minutosCicloTotal, sessaoA
         <span class="badge ${concluida ? 'success' : 'muted'}">${concluida ? 'Concluído' : `peso ${m.peso}`}</span>
       </div>
       <div class="mt-4" style="font-size:12px;">
-        ${jaEstudou
-          ? `<span class="text-muted">👁 Vista ${vezesVista}x nesta disciplina · ${_formatarMinutos(tempoHistoricoTotal)} ao todo (todas as voltas)</span>`
-          : `<span style="color:var(--danger);font-weight:600;">⚠ Ainda não estudada nenhuma vez</span>`
+        ${vezesVista > 0
+          ? `<span class="text-muted">👁 Vista ${vezesVista}x nesta disciplina · ${_formatarMinutos(tempoHistoricoSessoes)} ao todo (todas as voltas)</span>`
+          : jaEstudou
+            ? `<span class="text-muted">👁 Já estudada · ${_formatarMinutos(m.minutosFeitos)} registrados nesta volta</span>`
+            : `<span style="color:var(--danger);font-weight:600;">⚠ Ainda não estudada nenhuma vez</span>`
         }
       </div>
       <div class="pct-bar-wrap mt-8" style="min-width:auto;">
