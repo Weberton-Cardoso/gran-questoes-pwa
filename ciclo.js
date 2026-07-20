@@ -667,6 +667,15 @@ function _renderCicloLinhaMateria(m, materiasDoCiclo, minutosCicloTotal, sessaoA
   const concluida = meta > 0 && m.minutosFeitos >= meta;
   const emAndamento = sessaoAtiva && sessaoAtiva.materiaId === m.id;
   const cor = _CORES_MATERIA_CICLO[indice % _CORES_MATERIA_CICLO.length];
+
+  // Conta quantas vezes essa disciplina já foi estudada de verdade (em
+  // qualquer volta do ciclo, não só a atual — por isso usa o histórico de
+  // sessões, já que minutosFeitos zera a cada volta nova).
+  const sessoesComTempo = state.cicloSessoes.filter(s => s.cicloMateriaId === m.id && (s.minutos || 0) > 0);
+  const vezesVista = sessoesComTempo.length;
+  const tempoHistoricoTotal = sessoesComTempo.reduce((soma, s) => soma + s.minutos, 0);
+  const jaEstudou = vezesVista > 0;
+
   return `
     <div class="ciclo-materia-row ${emAndamento ? 'ativa' : ''}" style="border-left:4px solid ${cor};">
       <div class="ciclo-materia-topo">
@@ -675,6 +684,12 @@ function _renderCicloLinhaMateria(m, materiasDoCiclo, minutosCicloTotal, sessaoA
           ${escapeHtml(m.nome)}
         </span>
         <span class="badge ${concluida ? 'success' : 'muted'}">${concluida ? 'Concluído' : `peso ${m.peso}`}</span>
+      </div>
+      <div class="mt-4" style="font-size:12px;">
+        ${jaEstudou
+          ? `<span class="text-muted">👁 Vista ${vezesVista}x nesta disciplina · ${_formatarMinutos(tempoHistoricoTotal)} ao todo (todas as voltas)</span>`
+          : `<span style="color:var(--danger);font-weight:600;">⚠ Ainda não estudada nenhuma vez</span>`
+        }
       </div>
       <div class="pct-bar-wrap mt-8" style="min-width:auto;">
         <div class="pct-bar" style="flex:1;"><span style="width:${pct}%;background:${cor};"></span></div>
