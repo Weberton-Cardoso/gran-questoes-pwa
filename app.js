@@ -598,6 +598,8 @@ function renderDashboard(view) {
       <div class="stat-card info"><div class="label">Tempo estudado hoje</div><div class="value">${_formatarMinutos(minutosHoje)}</div></div>
     </div>
 
+    <div class="card mb-12" id="card-prioridade-revisao"></div>
+
     <div class="grid-2 mb-12">
       <div class="card">
         <div class="card-title">Acertos × Erros</div>
@@ -677,6 +679,112 @@ function renderDashboard(view) {
   initDashboardEditalChart();
   renderStatsPorDisciplina();
   renderTempoPorTipoCicloDashboard();
+  renderPrioridadeRevisao();
+}
+
+/**
+ * Card "O que revisar agora" — cruza, para cada disciplina de cada ciclo
+ * ativo: peso no edital, taxa de acerto (só do concurso daquele ciclo) e
+ * dias desde a última vez que foi estudada. Disciplinas NUNCA estudadas
+ * vêm sempre no topo (são a prioridade máxima); as demais são ordenadas
+ * por um score de urgência: peso × (100 − taxa) × dias sem revisar.
+ */
+function renderPrioridadeRevisao() {
+  const card = $('#card-prioridade-revisao');
+  if (!card) return;
+
+  const norm = (s) => (s || '').trim().toLowerCase();
+  const hoje = todayISO();
+  const materias = state.cicloMaterias || [];
+
+  if (!materias.length) {
+    card.innerHTML = `
+      <div class="card-title">📌 O que revisar agora</div>
+      <p class="text-muted" style="font-size:13.5px;margin-top:0;">Crie um Ciclo de Estudos com suas disciplinas para ver a prioridade de revisão aqui.</p>
+    `;
+    return;
+  }
+
+  const nuncaEstudadas = [];
+  const paraCalcular = [];
+
+  materias.forEach(m => {
+    const ciclo = state.ciclos.find(c => c.id === m.cicloId);
+    const nomeCiclo = ciclo ? ciclo.nome : '';
+
+    const sessoesDaMateria = state.cicloSessoes.filter(s => s.cicloMateriaId === m.id && (s.minutos || 0) > 0);
+    const jaEstudou = sessoesDaMateria.length > 0 || m.minutosFeitos > 0;
+
+    if (!jaEstudou) {
+      nuncaEstudadas.push({ materia: m, nomeCiclo });
+      return;
+    }
+
+    const tentativasDaMateria = state.tentativas.filter(t =>
+      norm(t.disciplina) === norm(m.nome) &&
+      (nomeCiclo ? norm(t.concurso) === norm(nomeCiclo) : true)
+    );
+    const totalQuestoes = tentativasDaMateria.reduce((s, t) => s + (t.numQuestoes || 0), 0);
+    const totalAcertos = tentativasDaMateria.reduce((s, t) => s + (t.acertos || 0), 0);
+    const taxa = totalQuestoes > 0 ? (totalAcertos / totalQuestoes) * 100 : 50; // sem dados = neutro
+
+    const ultimaData = sessoesDaMateria.length
+      ? sessoesDaMateria.map(s => s.data).sort().pop()
+      : null;
+    const diasSemRevisar = ultimaData
+      ? Math.max(1, Math.round((new Date(hoje) - new Date(ultimaData)) / 86400000))
+      : 30; // fallback, não deveria cair aqui já que jaEstudou é true
+
+    const urgencia = (m.peso || 1) * (100 - taxa) * diasSemRevisar;
+
+    paraCalcular.push({ materia: m, nomeCiclo, taxa, totalQuestoes, diasSemRevisar, urgencia });
+  });
+
+  paraCalcular.sort((a, b) => b.urgencia - a.urgencia);
+
+  const nuncaEstudadasOrdenadas = nuncaEstudadas.sort((a, b) => (b.materia.peso || 0) - (a.materia.peso || 0));
+  const listaFinal = [...nuncaEstudadasOrdenadas, ...paraCalcular].slice(0, 8);
+
+  if (!listaFinal.length) {
+    card.innerHTML = `
+      <div class="card-title">📌 O que revisar agora</div>
+      <p class="text-muted" style="font-size:13.5px;margin-top:0;">Tudo em dia por aqui!</p>
+    `;
+    return;
+  }
+
+  card.innerHTML = `
+    <div class="card-title">📌 O que revisar agora</div>
+    <p class="text-muted" style="font-size:12.5px;margin-top:-6px;margin-bottom:10px;">Combina peso no edital, taxa de acerto e há quanto tempo você não revisa cada disciplina.</p>
+    <div>
+      ${listaFinal.map((item, i) => {
+        const m = item.materia;
+        if (item.diasSemRevisar === undefined) {
+          // nunca estudada
+          return `
+            <div class="flex" style="justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);gap:10px;">
+              <div>
+                <strong>${i + 1}. ${escapeHtml(m.nome)}</strong>
+                <div class="text-muted" style="font-size:12px;">${item.nomeCiclo ? escapeHtml(item.nomeCiclo) + ' · ' : ''}peso ${m.peso} · <span style="color:var(--danger);">nunca estudada</span></div>
+              </div>
+            </div>
+          `;
+        }
+        return `
+          <div class="flex" style="justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);gap:10px;">
+            <div>
+              <strong>${i + 1}. ${escapeHtml(m.nome)}</strong>
+              <div class="text-muted" style="font-size:12px;">
+                ${item.nomeCiclo ? escapeHtml(item.nomeCiclo) + ' · ' : ''}peso ${m.peso} ·
+                ${item.totalQuestoes > 0 ? `${fmtPct(item.taxa)} de acerto` : 'sem questões registradas'} ·
+                há ${item.diasSemRevisar} dia${item.diasSemRevisar === 1 ? '' : 's'} sem revisar
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
 }
 
 /** Card do Dashboard com o tempo total (todos os ciclos, todo o histórico)
