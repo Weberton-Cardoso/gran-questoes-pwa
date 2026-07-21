@@ -621,6 +621,8 @@ function renderDashboard(view) {
       </div>
     </div>
 
+    <div class="card mt-12" id="card-tempo-por-tipo-ciclo"></div>
+
     ${buildDashboardEditalHTML()}
 
     <div class="card mt-12" id="card-stats-disciplina"></div>
@@ -674,6 +676,60 @@ function renderDashboard(view) {
 
   initDashboardEditalChart();
   renderStatsPorDisciplina();
+  renderTempoPorTipoCicloDashboard();
+}
+
+/** Card do Dashboard com o tempo total (todos os ciclos, todo o histórico)
+ *  gasto em cada tipo de estudo (Exercícios, Revisão, Vídeo, etc.), vindo
+ *  do Ciclo de Estudos — NÃO das tentativas/questões. É a soma geral, sem
+ *  filtro de período nem de "hoje". */
+function renderTempoPorTipoCicloDashboard() {
+  const card = $('#card-tempo-por-tipo-ciclo');
+  if (!card) return;
+
+  const totais = {};
+  state.cicloSessoes.forEach(s => {
+    const tipo = s.tipoEstudo || 'Não informado';
+    totais[tipo] = (totais[tipo] || 0) + (s.minutos || 0);
+  });
+  const lista = Object.entries(totais)
+    .filter(([, minutos]) => minutos > 0)
+    .sort((a, b) => b[1] - a[1]);
+
+  if (!lista.length) {
+    card.innerHTML = `
+      <div class="card-title">Tempo por tipo de estudo (Ciclo de Estudos)</div>
+      <p class="text-muted" style="font-size:13.5px;margin-top:0;">
+        Ainda não há sessões do Ciclo de Estudos com tipo registrado. Essa análise soma o
+        tempo de todos os ciclos e todo o histórico — não usa os registros de tentativas/questões.
+      </p>
+    `;
+    return;
+  }
+
+  const totalGeral = lista.reduce((soma, [, minutos]) => soma + minutos, 0);
+  card.innerHTML = `
+    <div class="card-title">Tempo por tipo de estudo (Ciclo de Estudos)</div>
+    <p class="text-muted" style="font-size:12.5px;margin-top:-6px;margin-bottom:10px;">Soma de todos os ciclos, todo o histórico — baseado no Ciclo de Estudos, não nas tentativas.</p>
+    <div class="chart-wrap" style="max-width:280px;margin:8px auto;"><canvas id="chart-tipo-estudo-dashboard"></canvas></div>
+    <div class="mt-8">
+      ${lista.map(([tipo, minutos], i) => `
+        <div class="flex" style="justify-content:space-between;font-size:13px;padding:5px 0;border-bottom:1px solid var(--border);">
+          <span>
+            <span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:${_CORES_TIPO_ESTUDO[i % _CORES_TIPO_ESTUDO.length]};margin-right:7px;"></span>
+            ${escapeHtml(tipo)}
+          </span>
+          <span class="text-muted">${_formatarMinutos(minutos)} · ${fmtPct((minutos / totalGeral) * 100)}</span>
+        </div>
+      `).join('')}
+    </div>
+  `;
+
+  renderStatusDoughnutChart('chart-tipo-estudo-dashboard', {
+    labels: lista.map(([tipo]) => tipo),
+    values: lista.map(([, minutos]) => Math.round(minutos)),
+    colors: lista.map((_, i) => _CORES_TIPO_ESTUDO[i % _CORES_TIPO_ESTUDO.length])
+  });
 }
 
 /** Seção "Estatísticas por disciplina" da Dashboard — tem seu próprio filtro
@@ -795,10 +851,15 @@ function renderTentativas(view) {
 
     const wrap = $('#lista-tentativas');
     if (!lista.length) {
-      wrap.innerHTML = `<div class="empty-state">
-        <p>Nenhuma tentativa registrada ainda.</p>
-        <button class="btn btn-primary" id="empty-add-tentativa">Registrar primeira tentativa</button>
-      </div>`;
+      wrap.innerHTML = termo
+        ? `<div class="empty-state">
+            <p>Nenhuma tentativa encontrada para "${escapeHtml(_tentativasBusca.trim())}".</p>
+            <p class="text-muted" style="font-size:13px;">Verifique a grafia ou limpe a busca para ver todas as tentativas.</p>
+          </div>`
+        : `<div class="empty-state">
+            <p>Nenhuma tentativa registrada ainda.</p>
+            <button class="btn btn-primary" id="empty-add-tentativa">Registrar primeira tentativa</button>
+          </div>`;
       $('#empty-add-tentativa')?.addEventListener('click', () => openTentativaModal());
       return;
     }
@@ -1602,6 +1663,16 @@ function renderConfiguracoes(view) {
     </div>
 
     <div class="card mt-12">
+      <div class="card-title">Reparar sessões do Ciclo de Estudos</div>
+      <p class="text-muted" style="font-size:13.5px;margin-top:0;">
+        Corrige sessões do Ciclo de Estudos que ficaram sem ligação com a disciplina certa
+        (isso podia acontecer em sincronizações antigas). Usa o nome já salvo em cada sessão
+        para reencontrar a disciplina certa — não apaga nada, só religa o que já existe.
+      </p>
+      <button class="btn" id="btn-reparar-sessoes">Reparar agora</button>
+    </div>
+
+    <div class="card mt-12">
       <div class="card-title">Zona de risco</div>
       <p class="text-muted" style="font-size:13.5px;margin-top:0;">Isto apaga permanentemente as tentativas, editais, ciclos e simulados do perfil ativo (${escapeHtml(state.perfis.find(p => p.id === db.perfilAtivoId)?.nome || '')}) neste dispositivo. Outros perfis não são afetados.</p>
       <button class="btn btn-danger" id="btn-zerar">Zerar estatísticas deste perfil</button>
@@ -1683,6 +1754,43 @@ function renderConfiguracoes(view) {
 
     await reloadState();
     showToast(`${gruposComDuplicata.length} registro(s) consolidado(s).`, 'success');
+    router();
+  });
+
+  $('#btn-reparar-sessoes').addEventListener('click', async () => {
+    if (typeof db.criarBackupLocalAutomatico === 'function') {
+      await db.criarBackupLocalAutomatico('antes_de_reparar_sessoes_orfas').catch(() => {});
+    }
+
+    const norm = (s) => (s || '').trim().toLowerCase();
+    const materias = await db.getAll('cicloMaterias');
+    const sessoes = await db.getAll('cicloSessoes');
+    const idsValidos = new Set(materias.map(m => m.id));
+
+    let religadas = 0;
+    let semCorrespondencia = 0;
+
+    for (const s of sessoes) {
+      if (idsValidos.has(s.cicloMateriaId)) continue;
+      const materiaCorreta = materias.find(m => norm(m.nome) === norm(s.nome));
+      if (materiaCorreta) {
+        await db.cicloSessoes.update({ ...s, cicloMateriaId: materiaCorreta.id });
+        religadas++;
+      } else {
+        semCorrespondencia++;
+      }
+    }
+
+    await reloadState();
+    if (religadas === 0 && semCorrespondencia === 0) {
+      showToast('Nenhuma sessão órfã encontrada — está tudo certo.', 'success');
+    } else {
+      showToast(
+        `${religadas} sessão(ões) religada(s).` +
+        (semCorrespondencia ? ` ${semCorrespondencia} sem disciplina correspondente.` : ''),
+        'success'
+      );
+    }
     router();
   });
 
