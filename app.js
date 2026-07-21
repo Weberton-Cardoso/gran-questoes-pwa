@@ -796,27 +796,33 @@ function renderPrioridadeRevisao() {
     const nomeCiclo = ciclo ? ciclo.nome : '';
 
     const sessoesDaMateria = state.cicloSessoes.filter(s => s.cicloMateriaId === m.id && (s.minutos || 0) > 0);
-    const jaEstudou = sessoesDaMateria.length > 0 || m.minutosFeitos > 0;
-
-    if (!jaEstudou) {
-      nuncaEstudadas.push({ materia: m, nomeCiclo });
-      return;
-    }
-
     const tentativasDaMateria = state.tentativas.filter(t =>
       norm(t.disciplina) === norm(m.nome) &&
       (nomeCiclo ? norm(t.concurso) === norm(nomeCiclo) : true)
     );
     const totalQuestoes = tentativasDaMateria.reduce((s, t) => s + (t.numQuestoes || 0), 0);
     const totalAcertos = tentativasDaMateria.reduce((s, t) => s + (t.acertos || 0), 0);
+
+    // "Já estudada" considera QUALQUER evidência: tempo no Ciclo de Estudos
+    // OU questões já registradas para essa disciplina (mesmo sem ter usado
+    // o cronômetro do ciclo nem uma vez).
+    const jaEstudou = sessoesDaMateria.length > 0 || m.minutosFeitos > 0 || totalQuestoes > 0;
+
+    if (!jaEstudou) {
+      nuncaEstudadas.push({ materia: m, nomeCiclo });
+      return;
+    }
+
     const taxa = totalQuestoes > 0 ? (totalAcertos / totalQuestoes) * 100 : 50; // sem dados = neutro
 
-    const ultimaData = sessoesDaMateria.length
-      ? sessoesDaMateria.map(s => s.data).sort().pop()
-      : null;
+    // "Há quanto tempo não revisa" olha a data mais recente entre sessões
+    // do ciclo E tentativas — o que tiver acontecido por último conta.
+    const datasSessoes = sessoesDaMateria.map(s => s.data).filter(Boolean);
+    const datasTentativas = tentativasDaMateria.map(t => t.data).filter(Boolean);
+    const ultimaData = [...datasSessoes, ...datasTentativas].sort().pop() || null;
     const diasSemRevisar = ultimaData
       ? Math.max(1, Math.round((new Date(hoje) - new Date(ultimaData)) / 86400000))
-      : 30; // fallback, não deveria cair aqui já que jaEstudou é true
+      : 30; // fallback (não deveria cair aqui, já que jaEstudou é true)
 
     const urgencia = (m.peso || 1) * (100 - taxa) * diasSemRevisar;
 
