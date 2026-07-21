@@ -625,6 +625,8 @@ function renderDashboard(view) {
 
     <div class="card mt-12" id="card-tempo-por-tipo-ciclo"></div>
 
+    <div class="card mt-12" id="card-correlacao-tipo-taxa"></div>
+
     ${buildDashboardEditalHTML()}
 
     <div class="card mt-12" id="card-stats-disciplina"></div>
@@ -680,6 +682,87 @@ function renderDashboard(view) {
   renderStatsPorDisciplina();
   renderTempoPorTipoCicloDashboard();
   renderPrioridadeRevisao();
+  renderCorrelacaoTipoTaxa();
+}
+
+/**
+ * Card "Tipo de estudo × desempenho": para cada disciplina, descobre qual
+ * foi o tipo de estudo predominante (o que teve mais minutos acumulados
+ * nela, olhando db.cicloSessoes de todos os ciclos). Agrupa as disciplinas
+ * por esse tipo predominante e calcula a taxa de acerto média (ponderada
+ * pelo número de questões) de cada grupo — assim dá pra ver se, por
+ * exemplo, disciplinas estudadas mais por Exercícios têm desempenho
+ * diferente das estudadas mais por Vídeo.
+ */
+function renderCorrelacaoTipoTaxa() {
+  const card = $('#card-correlacao-tipo-taxa');
+  if (!card) return;
+
+  const norm = (s) => (s || '').trim().toLowerCase();
+  const materias = state.cicloMaterias || [];
+
+  const grupos = {}; // tipo -> { totalQuestoes, totalAcertos, disciplinas: Set }
+
+  materias.forEach(m => {
+    const sessoesDaMateria = state.cicloSessoes.filter(s => s.cicloMateriaId === m.id && (s.minutos || 0) > 0 && s.tipoEstudo);
+    if (!sessoesDaMateria.length) return; // sem tipo registrado, não entra na correlação
+
+    const porTipo = {};
+    sessoesDaMateria.forEach(s => { porTipo[s.tipoEstudo] = (porTipo[s.tipoEstudo] || 0) + s.minutos; });
+    const tipoPredominante = Object.entries(porTipo).sort((a, b) => b[1] - a[1])[0][0];
+
+    const ciclo = state.ciclos.find(c => c.id === m.cicloId);
+    const nomeCiclo = ciclo ? ciclo.nome : '';
+    const tentativasDaMateria = state.tentativas.filter(t =>
+      norm(t.disciplina) === norm(m.nome) &&
+      (nomeCiclo ? norm(t.concurso) === norm(nomeCiclo) : true)
+    );
+    const totalQuestoes = tentativasDaMateria.reduce((s, t) => s + (t.numQuestoes || 0), 0);
+    const totalAcertos = tentativasDaMateria.reduce((s, t) => s + (t.acertos || 0), 0);
+    if (totalQuestoes === 0) return; // sem questões, não dá pra medir desempenho
+
+    if (!grupos[tipoPredominante]) grupos[tipoPredominante] = { totalQuestoes: 0, totalAcertos: 0, disciplinas: new Set() };
+    grupos[tipoPredominante].totalQuestoes += totalQuestoes;
+    grupos[tipoPredominante].totalAcertos += totalAcertos;
+    grupos[tipoPredominante].disciplinas.add(m.nome);
+  });
+
+  const lista = Object.entries(grupos)
+    .map(([tipo, g]) => ({ tipo, taxa: (g.totalAcertos / g.totalQuestoes) * 100, disciplinas: g.disciplinas.size, questoes: g.totalQuestoes }))
+    .sort((a, b) => b.taxa - a.taxa);
+
+  if (lista.length < 2) {
+    card.innerHTML = `
+      <div class="card-title">🔬 Tipo de estudo × desempenho</div>
+      <p class="text-muted" style="font-size:13.5px;margin-top:0;">
+        Ainda não há disciplinas suficientes com tipo de estudo e questões registradas para comparar.
+        Continue marcando o tipo (Vídeo, Exercícios, Revisão...) nas sessões do Ciclo de Estudos e
+        registrando tentativas — essa análise aparece assim que houver pelo menos 2 tipos com dados.
+      </p>
+    `;
+    return;
+  }
+
+  card.innerHTML = `
+    <div class="card-title">🔬 Tipo de estudo × desempenho</div>
+    <p class="text-muted" style="font-size:12.5px;margin-top:-6px;margin-bottom:10px;">
+      Agrupa cada disciplina pelo tipo de estudo que você mais usou nela, e mostra a taxa de acerto média de cada grupo.
+    </p>
+    <div>
+      ${lista.map(item => `
+        <div class="flex" style="justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);gap:10px;">
+          <span>${escapeHtml(item.tipo)}</span>
+          <span class="text-muted" style="font-size:13px;">
+            <strong style="color:var(--gold);">${fmtPct(item.taxa)}</strong>
+            · ${item.disciplinas} disciplina${item.disciplinas === 1 ? '' : 's'} · ${item.questoes} questões
+          </span>
+        </div>
+      `).join('')}
+    </div>
+    <p class="text-muted" style="font-size:11.5px;margin-top:10px;margin-bottom:0;">
+      Correlação, não causa: uma disciplina que você domina bem pode simplesmente precisar de menos exercícios e mais revisão, por exemplo.
+    </p>
+  `;
 }
 
 /**
