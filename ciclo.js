@@ -548,6 +548,28 @@ function renderCicloPainelRoute(view, cicloId) {
       await _registrarRodadaCiclo(materia, view, cicloId);
     });
   });
+
+  $$('[data-vincular-nomes]', view).forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const materia = state.cicloMaterias.find(m => m.id === Number(btn.dataset.vincularNomes));
+      if (!materia) return;
+
+      const resposta = prompt(
+        `Quais outros nomes você já usou (ou vai usar) nas Tentativas pra "${materia.nome}"?\n` +
+        `Separe por vírgula se for mais de um. Ex.: AFO, Administração Financeira\n\n` +
+        `Isso NÃO muda o nome da disciplina no Ciclo — só ensina o app a reconhecer esses` +
+        ` outros nomes como sendo a mesma disciplina, pra contar certo a taxa de acerto e o histórico.`,
+        materia.apelidos || ''
+      );
+      if (resposta === null) return;
+
+      const apelidos = resposta.split(',').map(a => a.trim()).filter(Boolean).join(', ');
+      await db.cicloMaterias.update({ ...materia, apelidos: apelidos || null });
+      await reloadState();
+      showToast(apelidos ? 'Nomes vinculados com sucesso.' : 'Vínculos removidos.', 'success');
+      renderCicloPainelRoute(view, cicloId);
+    });
+  });
 }
 
 /**
@@ -661,6 +683,22 @@ function _renderCicloSessaoAtivaCard(sessaoAtiva) {
   `;
 }
 
+/**
+ * Compara o nome de uma disciplina de tentativa com uma disciplina do
+ * Ciclo de Estudos, considerando também os APELIDOS que o usuário tiver
+ * cadastrado para ela (ex.: disciplina do ciclo = "Administração
+ * Financeira e Orçamentária - AFO", apelido = "AFO"). Isso resolve o caso
+ * comum de usar um nome mais curto/abreviado ao registrar tentativas.
+ */
+function _materiaCasaComDisciplina(materia, nomeDisciplina) {
+  const norm = (s) => (s || '').trim().toLowerCase();
+  const alvo = norm(nomeDisciplina);
+  if (!alvo) return false;
+  if (norm(materia.nome) === alvo) return true;
+  const apelidos = (materia.apelidos || '').split(',').map(a => norm(a)).filter(Boolean);
+  return apelidos.includes(alvo);
+}
+
 function _renderCicloLinhaMateria(m, materiasDoCiclo, minutosCicloTotal, sessaoAtiva, indice = 0, nomeConcurso = '') {
   const meta = _cicloMetaMinutos(m, materiasDoCiclo, minutosCicloTotal);
   const pct = meta ? Math.min(100, (m.minutosFeitos / meta) * 100) : 0;
@@ -668,13 +706,13 @@ function _renderCicloLinhaMateria(m, materiasDoCiclo, minutosCicloTotal, sessaoA
   const emAndamento = sessaoAtiva && sessaoAtiva.materiaId === m.id;
   const cor = _CORES_MATERIA_CICLO[indice % _CORES_MATERIA_CICLO.length];
 
-  // Taxa de acerto geral dessa disciplina, casando pelo nome com as
-  // tentativas já registradas — e SÓ dentro do concurso deste ciclo (ex.:
-  // "TCDF"), pra não misturar com registros de outros concursos ou com o
-  // histórico importado em massa do Gran Questões (que não tem concurso).
+  // Taxa de acerto geral dessa disciplina, casando pelo nome (ou apelido)
+  // com as tentativas já registradas — e SÓ dentro do concurso deste ciclo
+  // (ex.: "TCDF"), pra não misturar com registros de outros concursos ou
+  // com o histórico importado em massa do Gran Questões (sem concurso).
   const norm = (s) => (s || '').trim().toLowerCase();
   const tentativasDaMateria = state.tentativas.filter(t =>
-    norm(t.disciplina) === norm(m.nome) &&
+    _materiaCasaComDisciplina(m, t.disciplina) &&
     (nomeConcurso ? norm(t.concurso) === norm(nomeConcurso) : true)
   );
   const totalQuestoesMateria = tentativasDaMateria.reduce((soma, t) => soma + (t.numQuestoes || 0), 0);
@@ -716,6 +754,7 @@ function _renderCicloLinhaMateria(m, materiasDoCiclo, minutosCicloTotal, sessaoA
           ? `<span class="text-muted">🎯 Taxa de acertos${nomeConcurso ? ` em ${escapeHtml(nomeConcurso)}` : ''}: <strong style="color:var(--gold);">${fmtPct(taxaMateria)}</strong> (${totalAcertosMateria}/${totalQuestoesMateria} questões)</span>`
           : `<span class="text-muted">🎯 Nenhuma questão registrada ainda${nomeConcurso ? ` para o concurso ${escapeHtml(nomeConcurso)}` : ''} nessa disciplina</span>`
         }
+        ${m.apelidos ? `<div class="text-muted" style="margin-top:2px;">🔗 Também conta como: ${escapeHtml(m.apelidos)}</div>` : ''}
       </div>
       <div class="pct-bar-wrap mt-8" style="min-width:auto;">
         <div class="pct-bar" style="flex:1;"><span style="width:${pct}%;background:${cor};"></span></div>
@@ -728,7 +767,8 @@ function _renderCicloLinhaMateria(m, materiasDoCiclo, minutosCicloTotal, sessaoA
              <button class="btn btn-sm btn-ghost" data-manual="${m.id}">Editar tempo</button>
              <button class="btn btn-sm btn-ghost" data-manual-total="${m.id}" title="Corrigir o valor exato, sem somar">Corrigir total</button>
              <button class="btn btn-sm btn-ghost" data-editar-tipo="${m.id}" title="Registra uma nova rodada de estudo, somando ao tempo e marcando o tipo">Registrar tipo</button>
-             <button class="btn btn-sm btn-ghost" data-editar-topico="${m.id}" title="Registra uma nova rodada de estudo, somando ao tempo e marcando o tópico">Registrar tópico</button>`
+             <button class="btn btn-sm btn-ghost" data-editar-topico="${m.id}" title="Registra uma nova rodada de estudo, somando ao tempo e marcando o tópico">Registrar tópico</button>
+             <button class="btn btn-sm btn-ghost" data-vincular-nomes="${m.id}" title="Vincula nomes diferentes usados nas Tentativas a esta disciplina">Vincular nomes</button>`
         }
       </div>
     </div>

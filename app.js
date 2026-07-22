@@ -714,7 +714,7 @@ function renderCorrelacaoTipoTaxa() {
     const ciclo = state.ciclos.find(c => c.id === m.cicloId);
     const nomeCiclo = ciclo ? ciclo.nome : '';
     const tentativasDaMateria = state.tentativas.filter(t =>
-      norm(t.disciplina) === norm(m.nome) &&
+      _materiaCasaComDisciplina(m, t.disciplina) &&
       (nomeCiclo ? norm(t.concurso) === norm(nomeCiclo) : true)
     );
     const totalQuestoes = tentativasDaMateria.reduce((s, t) => s + (t.numQuestoes || 0), 0);
@@ -797,7 +797,7 @@ function renderPrioridadeRevisao() {
 
     const sessoesDaMateria = state.cicloSessoes.filter(s => s.cicloMateriaId === m.id && (s.minutos || 0) > 0);
     const tentativasDaMateria = state.tentativas.filter(t =>
-      norm(t.disciplina) === norm(m.nome) &&
+      _materiaCasaComDisciplina(m, t.disciplina) &&
       (nomeCiclo ? norm(t.concurso) === norm(nomeCiclo) : true)
     );
     const totalQuestoes = tentativasDaMateria.reduce((s, t) => s + (t.numQuestoes || 0), 0);
@@ -830,11 +830,9 @@ function renderPrioridadeRevisao() {
   });
 
   paraCalcular.sort((a, b) => b.urgencia - a.urgencia);
-
   const nuncaEstudadasOrdenadas = nuncaEstudadas.sort((a, b) => (b.materia.peso || 0) - (a.materia.peso || 0));
-  const listaFinal = [...nuncaEstudadasOrdenadas, ...paraCalcular].slice(0, 8);
 
-  if (!listaFinal.length) {
+  if (!paraCalcular.length && !nuncaEstudadasOrdenadas.length) {
     card.innerHTML = `
       <div class="card-title">📌 O que revisar agora</div>
       <p class="text-muted" style="font-size:13.5px;margin-top:0;">Tudo em dia por aqui!</p>
@@ -842,37 +840,39 @@ function renderPrioridadeRevisao() {
     return;
   }
 
+  const linhaJaEstudada = (item, i) => {
+    const m = item.materia;
+    return `
+      <div class="flex" style="justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);gap:10px;">
+        <div>
+          <strong>${i + 1}. ${escapeHtml(m.nome)}</strong>
+          <div class="text-muted" style="font-size:12px;">
+            ${item.nomeCiclo ? escapeHtml(item.nomeCiclo) + ' · ' : ''}peso ${m.peso} ·
+            ${item.totalQuestoes > 0 ? `${fmtPct(item.taxa)} de acerto` : 'sem questões registradas'} ·
+            há ${item.diasSemRevisar} dia${item.diasSemRevisar === 1 ? '' : 's'} sem revisar
+          </div>
+        </div>
+      </div>
+    `;
+  };
+
+  const linhaNuncaEstudada = (item) => `
+    <div class="flex" style="justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);gap:10px;">
+      <span>${escapeHtml(item.materia.nome)}</span>
+      <span class="text-muted" style="font-size:12px;">${item.nomeCiclo ? escapeHtml(item.nomeCiclo) + ' · ' : ''}peso ${item.materia.peso}</span>
+    </div>
+  `;
+
   card.innerHTML = `
     <div class="card-title">📌 O que revisar agora</div>
     <p class="text-muted" style="font-size:12.5px;margin-top:-6px;margin-bottom:10px;">Combina peso no edital, taxa de acerto e há quanto tempo você não revisa cada disciplina.</p>
-    <div>
-      ${listaFinal.map((item, i) => {
-        const m = item.materia;
-        if (item.diasSemRevisar === undefined) {
-          // nunca estudada
-          return `
-            <div class="flex" style="justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);gap:10px;">
-              <div>
-                <strong>${i + 1}. ${escapeHtml(m.nome)}</strong>
-                <div class="text-muted" style="font-size:12px;">${item.nomeCiclo ? escapeHtml(item.nomeCiclo) + ' · ' : ''}peso ${m.peso} · <span style="color:var(--danger);">nunca estudada</span></div>
-              </div>
-            </div>
-          `;
-        }
-        return `
-          <div class="flex" style="justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);gap:10px;">
-            <div>
-              <strong>${i + 1}. ${escapeHtml(m.nome)}</strong>
-              <div class="text-muted" style="font-size:12px;">
-                ${item.nomeCiclo ? escapeHtml(item.nomeCiclo) + ' · ' : ''}peso ${m.peso} ·
-                ${item.totalQuestoes > 0 ? `${fmtPct(item.taxa)} de acerto` : 'sem questões registradas'} ·
-                há ${item.diasSemRevisar} dia${item.diasSemRevisar === 1 ? '' : 's'} sem revisar
-              </div>
-            </div>
-          </div>
-        `;
-      }).join('')}
-    </div>
+    ${paraCalcular.length ? `
+      <div>${paraCalcular.slice(0, 8).map(linhaJaEstudada).join('')}</div>
+    ` : `<p class="text-muted" style="font-size:13px;">Nenhuma disciplina já estudada com dado suficiente pra calcular urgência ainda.</p>`}
+    ${nuncaEstudadasOrdenadas.length ? `
+      <div class="mt-12" style="font-size:12.5px;font-weight:700;color:var(--danger);">⚠ Ainda não estudadas (${nuncaEstudadasOrdenadas.length})</div>
+      <div class="mt-4">${nuncaEstudadasOrdenadas.map(linhaNuncaEstudada).join('')}</div>
+    ` : ''}
   `;
 }
 
