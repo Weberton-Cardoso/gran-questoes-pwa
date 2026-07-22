@@ -334,6 +334,14 @@ const db = {
   },
 
   update(storeName, obj) {
+    // Mesma rede de segurança do add(): se por algum motivo o objeto que
+    // está sendo salvo perdeu o perfilId (ex.: uma tela de edição
+    // reconstruiu o objeto do zero sem incluir esse campo), reaproveita o
+    // perfilId atual em vez de gravar undefined — o que faria o registro
+    // "sumir" silenciosamente por ficar de fora do filtro por perfil.
+    if (PERFIL_SCOPED_STORES.has(storeName) && obj.perfilId == null) {
+      obj = { ...obj, perfilId: db.perfilAtivoId };
+    }
     return tx(storeName, 'readwrite', (store) => store.put(obj));
   },
 
@@ -497,6 +505,39 @@ const db = {
     await restaurar(STORES.ciclos, dados.ciclos);
     await restaurar(STORES.cicloMaterias, dados.cicloMaterias);
     await restaurar(STORES.cicloSessoes, dados.cicloSessoes);
+  },
+
+  /** Encontra e corrige registros "invisíveis" — itens de stores com
+   *  escopo por perfil (tentativas, editais, simulados, ciclos,
+   *  cicloMaterias, cicloSessoes) que ficaram sem perfilId por causa de um
+   *  bug em telas de edição antigas. Como não dá pra saber com certeza a
+   *  qual perfil pertenciam, assume o perfil ATIVO no momento do reparo
+   *  (o mais provável, especialmente para quem usa só um perfil). Cria um
+   *  backup automático antes, por segurança. */
+  async repararPerfilIdAusente() {
+    await db.criarBackupLocalAutomatico('antes_de_reparar_perfil_ausente').catch(() => {});
+
+    const stores = [
+      STORES.tentativas, STORES.editais, STORES.simulados,
+      STORES.ciclos, STORES.cicloMaterias, STORES.cicloSessoes
+    ];
+
+    let totalReparados = 0;
+    const porStore = {};
+
+    for (const storeName of stores) {
+      const todos = await tx(storeName, 'readonly', (store) => store.getAll());
+      const semPerfil = todos.filter(item => item.perfilId == null);
+      if (semPerfil.length) {
+        await Promise.all(semPerfil.map(item =>
+          tx(storeName, 'readwrite', (store) => store.put({ ...item, perfilId: db.perfilAtivoId }))
+        ));
+        porStore[storeName] = semPerfil.length;
+        totalReparados += semPerfil.length;
+      }
+    }
+
+    return { totalReparados, porStore };
   },
 
   /** Cria um snapshot completo (todos os perfis) no store local de backups

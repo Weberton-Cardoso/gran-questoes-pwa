@@ -1362,7 +1362,7 @@ function openTentativaModal(tentativa = null) {
       });
       showToast(`Somado ao registro de hoje: ${novoNum} questões no total.`, 'success');
     } else if (isEdit) {
-      await db.tentativas.update({ id: t.id, ...obj });
+      await db.tentativas.update({ ...t, ...obj, id: t.id });
       showToast('Tentativa atualizada.', 'success');
     } else {
       await db.tentativas.add(obj);
@@ -1870,6 +1870,17 @@ function renderConfiguracoes(view) {
     </div>
 
     <div class="card mt-12">
+      <div class="card-title">Recuperar registros invisíveis</div>
+      <p class="text-muted" style="font-size:13.5px;margin-top:0;">
+        Corrige tentativas, editais, simulados e dados do Ciclo de Estudos que ficaram sem
+        vínculo com nenhum perfil (isso podia acontecer ao editar um registro, por um bug já
+        corrigido) — o registro continuava existindo, só ficava fora da lista. Cria um backup
+        antes de reparar.
+      </p>
+      <button class="btn" id="btn-reparar-perfil">Recuperar agora</button>
+    </div>
+
+    <div class="card mt-12">
       <div class="card-title">Zona de risco</div>
       <p class="text-muted" style="font-size:13.5px;margin-top:0;">Isto apaga permanentemente as tentativas, editais, ciclos e simulados do perfil ativo (${escapeHtml(state.perfis.find(p => p.id === db.perfilAtivoId)?.nome || '')}) neste dispositivo. Outros perfis não são afetados.</p>
       <button class="btn btn-danger" id="btn-zerar">Zerar estatísticas deste perfil</button>
@@ -1987,6 +1998,18 @@ function renderConfiguracoes(view) {
         (semCorrespondencia ? ` ${semCorrespondencia} sem disciplina correspondente.` : ''),
         'success'
       );
+    }
+    router();
+  });
+
+  $('#btn-reparar-perfil').addEventListener('click', async () => {
+    const { totalReparados, porStore } = await db.repararPerfilIdAusente();
+    await reloadState();
+    if (totalReparados === 0) {
+      showToast('Nenhum registro invisível encontrado — está tudo certo.', 'success');
+    } else {
+      const detalhe = Object.entries(porStore).map(([loja, n]) => `${n} em ${loja}`).join(', ');
+      showToast(`${totalReparados} registro(s) recuperado(s) (${detalhe}).`, 'success');
     }
     router();
   });
