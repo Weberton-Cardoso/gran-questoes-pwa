@@ -988,9 +988,11 @@ function renderPrioridadeRevisao() {
       ? Math.max(0, Math.round((new Date(hoje) - new Date(ultimaData)) / 86400000))
       : 30; // fallback (não deveria cair aqui, já que jaEstudou é true)
 
-    // Urgência usa pelo menos 1 "dia" no cálculo do score (revisar hoje ainda
-    // conta como pouco urgente, mas não zera o score de disciplinas de peso alto).
-    const urgencia = (m.peso || 1) * (100 - taxa) * Math.max(1, diasSemRevisar);
+    // Urgência usa o número real de dias sem revisar (pode ser 0). Isso é
+    // proposital: uma matéria estudada HOJE tem urgência 0 e vai pro fim da
+    // lista, mesmo que tenha peso alto ou taxa de acerto baixa — afinal ela
+    // acabou de ser revisada, então não faz sentido pedir revisão "agora".
+    const urgencia = (m.peso || 1) * (100 - taxa) * diasSemRevisar;
 
     paraCalcular.push({ materia: m, nomeCiclo, taxa, totalQuestoes, diasSemRevisar, urgencia });
   });
