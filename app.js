@@ -985,10 +985,12 @@ function renderPrioridadeRevisao() {
     const datasTentativas = tentativasDaMateria.map(t => t.data).filter(Boolean);
     const ultimaData = [...datasSessoes, ...datasTentativas].sort().pop() || null;
     const diasSemRevisar = ultimaData
-      ? Math.max(1, Math.round((new Date(hoje) - new Date(ultimaData)) / 86400000))
+      ? Math.max(0, Math.round((new Date(hoje) - new Date(ultimaData)) / 86400000))
       : 30; // fallback (não deveria cair aqui, já que jaEstudou é true)
 
-    const urgencia = (m.peso || 1) * (100 - taxa) * diasSemRevisar;
+    // Urgência usa pelo menos 1 "dia" no cálculo do score (revisar hoje ainda
+    // conta como pouco urgente, mas não zera o score de disciplinas de peso alto).
+    const urgencia = (m.peso || 1) * (100 - taxa) * Math.max(1, diasSemRevisar);
 
     paraCalcular.push({ materia: m, nomeCiclo, taxa, totalQuestoes, diasSemRevisar, urgencia });
   });
@@ -1013,7 +1015,7 @@ function renderPrioridadeRevisao() {
           <div class="text-muted" style="font-size:12px;">
             ${item.nomeCiclo ? escapeHtml(item.nomeCiclo) + ' · ' : ''}peso ${m.peso} ·
             ${item.totalQuestoes > 0 ? `${fmtPct(item.taxa)} de acerto` : 'sem questões registradas'} ·
-            há ${item.diasSemRevisar} dia${item.diasSemRevisar === 1 ? '' : 's'} sem revisar
+            ${item.diasSemRevisar === 0 ? 'estudada hoje' : `há ${item.diasSemRevisar} dia${item.diasSemRevisar === 1 ? '' : 's'} sem revisar`}
           </div>
         </div>
       </div>
