@@ -41,6 +41,17 @@ function daysAgoISO(n) {
   return toISODate(d);
 }
 
+/** Soma (ou subtrai, com delta negativo) dias a uma data 'YYYY-MM-DD',
+ *  construindo o Date a partir dos componentes locais (evita o bug clássico
+ *  de "new Date('YYYY-MM-DD')" ser interpretado como UTC e voltar 1 dia
+ *  em fusos negativos como o do Brasil). */
+function addDiasISO(iso, delta) {
+  const [y, m, d] = iso.split('-').map(Number);
+  const dt = new Date(y, m - 1, d);
+  dt.setDate(dt.getDate() + delta);
+  return toISODate(dt);
+}
+
 function fmtPct(n) {
   if (!isFinite(n)) return '0%';
   return `${n.toFixed(1)}%`;
@@ -107,7 +118,10 @@ const state = {
   cicloSessoes: [],
   perfis: [],
   dashboardFiltro: { tipo: '7d', inicio: null, fim: null },
-  statsDisciplinaFiltro: { tipo: 'tudo', inicio: null, fim: null, disciplina: 'todas' }
+  statsDisciplinaFiltro: { tipo: 'tudo', inicio: null, fim: null, disciplina: 'todas' },
+  // Data selecionada no card "Relatório diário de estudos" — começa em null
+  // e é resolvida para hoje na primeira renderização (ver renderRelatorioDiario).
+  relatorioDiarioData: null
 };
 
 async function reloadState() {
@@ -844,48 +858,71 @@ function renderCorrelacaoTipoTaxa() {
 
 /**
  * Card "Relatório diário de estudos" — junta numa única tabela, por
- * matéria, tudo que aconteceu HOJE: os tópicos e tipos de estudo vistos
- * (tanto no Ciclo de Estudos quanto nas tentativas de questões), o tempo
- * estudado (Ciclo de Estudos) e o desempenho em questões (tentativas).
- * É sempre referente a hoje — mas como recalcula a cada renderDashboard(),
- * fica "ao vivo": qualquer sessão do ciclo ou tentativa registrada agora
- * aparece aqui assim que a tela for atualizada. Quando o filtro de período
- * do dashboard também está em "Hoje", os cartões de resumo no topo batem
- * exatamente com os totais mostrados aqui.
+ * matéria, tudo que aconteceu num dia (hoje, por padrão): os tópicos e
+ * tipos de estudo vistos (tanto no Ciclo de Estudos quanto nas tentativas
+ * de questões), o tempo estudado (Ciclo de Estudos) e o desempenho em
+ * questões (tentativas). O dia mostrado é controlado por
+ * state.relatorioDiarioData e pode ser navegado com as setas ◀▶ ou o campo
+ * de data no cabeçalho do card — os dados de qualquer dia já registrado
+ * continuam salvos no banco (cicloSessoes/tentativas têm sua própria data),
+ * então não precisa de nada extra pra "guardar": só era preciso esse filtro
+ * na tela. Quando o dia mostrado é hoje E o filtro de período do dashboard
+ * também está em "Hoje", os cartões de resumo no topo batem com os totais
+ * mostrados aqui.
  */
 function renderRelatorioDiario() {
   const card = $('#card-relatorio-diario');
   if (!card) return;
 
   const hojeISO = todayISO();
-  const { materias, totais } = calcRelatorioDiario(hojeISO);
+  if (!state.relatorioDiarioData) state.relatorioDiarioData = hojeISO;
+  const dataSelecionada = state.relatorioDiarioData;
+
+  const { materias, totais } = calcRelatorioDiario(dataSelecionada);
+  const vendoHoje = dataSelecionada === hojeISO;
   const filtroEhHoje = state.dashboardFiltro.tipo === 'hoje';
 
-  card.style.borderColor = filtroEhHoje ? 'var(--gold)' : '';
+  card.style.borderColor = (vendoHoje && filtroEhHoje) ? 'var(--gold)' : '';
+
+  const cabecalho = `
+    <div class="flex" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:4px;">
+      <div class="card-title" style="margin:0;">🗓️ Relatório diário de estudos — ${toBRDate(dataSelecionada)}${vendoHoje ? ' (hoje)' : ''}</div>
+      <div class="flex" style="gap:6px;align-items:center;">
+        <button class="btn btn-sm" id="rel-dia-anterior" title="Dia anterior">◀</button>
+        <input type="date" id="rel-dia-input" value="${dataSelecionada}" min="2015-01-01" max="${hojeISO}">
+        <button class="btn btn-sm" id="rel-dia-proximo" title="Próximo dia" ${vendoHoje ? 'disabled' : ''}>▶</button>
+        ${!vendoHoje ? `<button class="btn btn-sm" id="rel-dia-hoje">Hoje</button>` : ''}
+      </div>
+    </div>
+  `;
 
   if (!materias.length) {
     card.innerHTML = `
-      <div class="card-title">🗓️ Relatório diário de estudos — ${toBRDate(hojeISO)}</div>
+      ${cabecalho}
       <p class="text-muted" style="font-size:13.5px;margin-top:0;">
-        Nenhuma sessão do Ciclo de Estudos ou tentativa de questões registrada hoje ainda.
-        Assim que você estudar algo ou lançar questões, o resumo do dia aparece aqui, matéria por matéria.
+        ${vendoHoje
+          ? 'Nenhuma sessão do Ciclo de Estudos ou tentativa de questões registrada hoje ainda. Assim que você estudar algo ou lançar questões, o resumo do dia aparece aqui, matéria por matéria.'
+          : 'Nenhuma sessão do Ciclo de Estudos ou tentativa de questões registrada nesse dia.'}
       </p>
     `;
+    _wireRelatorioDiarioControles(card);
     return;
   }
 
   card.innerHTML = `
-    <div class="card-title">🗓️ Relatório diário de estudos — ${toBRDate(hojeISO)}</div>
+    ${cabecalho}
     <p class="text-muted" style="font-size:12.5px;margin-top:-6px;margin-bottom:14px;">
-      Combina automaticamente as sessões do Ciclo de Estudos e as tentativas de questões registradas hoje, por matéria.
-      ${filtroEhHoje
-        ? 'O filtro de período acima está em "Hoje" — os cartões de resumo no topo mostram os mesmos totais.'
-        : 'Este resumo é sempre referente a hoje, independente do filtro de período escolhido acima.'}
+      Combina automaticamente as sessões do Ciclo de Estudos e as tentativas de questões registradas nesse dia, por matéria.
+      ${vendoHoje
+        ? (filtroEhHoje
+            ? ' O filtro de período acima está em "Hoje" — os cartões de resumo no topo mostram os mesmos totais.'
+            : ' Use as setas ou o campo de data acima pra ver dias anteriores.')
+        : ' Use as setas, o campo de data ou o botão "Hoje" acima pra navegar entre os dias.'}
     </p>
 
     <div class="stat-grid" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:16px;">
-      <div class="stat-card info"><div class="label">Tempo total hoje</div><div class="value" style="font-size:20px;">${_formatarMinutos(totais.minutos)}</div></div>
-      <div class="stat-card"><div class="label">Questões hoje</div><div class="value" style="font-size:20px;">${totais.numQuestoes}</div></div>
+      <div class="stat-card info"><div class="label">Tempo total</div><div class="value" style="font-size:20px;">${_formatarMinutos(totais.minutos)}</div></div>
+      <div class="stat-card"><div class="label">Questões</div><div class="value" style="font-size:20px;">${totais.numQuestoes}</div></div>
       <div class="stat-card success"><div class="label">Certas</div><div class="value" style="font-size:20px;">${totais.acertos}</div></div>
       <div class="stat-card danger"><div class="label">Erradas</div><div class="value" style="font-size:20px;">${totais.erros}</div></div>
       <div class="stat-card gold"><div class="label">Taxa de acerto</div><div class="value" style="font-size:20px;">${fmtPct(totais.taxa)}</div></div>
@@ -927,6 +964,39 @@ function renderRelatorioDiario() {
       </table>
     </div>
   `;
+
+  _wireRelatorioDiarioControles(card);
+}
+
+/** Liga os botões/campo de navegação de data do card de relatório diário. */
+function _wireRelatorioDiarioControles(card) {
+  const hojeISO = todayISO();
+
+  const input = $('#rel-dia-input', card);
+  if (input) input.addEventListener('change', () => {
+    if (!input.value) return;
+    state.relatorioDiarioData = input.value > hojeISO ? hojeISO : input.value;
+    renderRelatorioDiario();
+  });
+
+  const btnAnterior = $('#rel-dia-anterior', card);
+  if (btnAnterior) btnAnterior.addEventListener('click', () => {
+    state.relatorioDiarioData = addDiasISO(state.relatorioDiarioData || hojeISO, -1);
+    renderRelatorioDiario();
+  });
+
+  const btnProximo = $('#rel-dia-proximo', card);
+  if (btnProximo) btnProximo.addEventListener('click', () => {
+    const proximo = addDiasISO(state.relatorioDiarioData || hojeISO, 1);
+    state.relatorioDiarioData = proximo > hojeISO ? hojeISO : proximo;
+    renderRelatorioDiario();
+  });
+
+  const btnHoje = $('#rel-dia-hoje', card);
+  if (btnHoje) btnHoje.addEventListener('click', () => {
+    state.relatorioDiarioData = hojeISO;
+    renderRelatorioDiario();
+  });
 }
 
 /**
