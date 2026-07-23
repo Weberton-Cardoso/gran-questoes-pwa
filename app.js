@@ -472,6 +472,77 @@ function calcResumo(lista) {
   return { tentativas, total, certas, erradas, taxa };
 }
 
+/**
+ * Relatório diário completo: combina, para UMA data específica (hoje, por
+ * padrão), as sessões de tempo do Ciclo de Estudos (state.cicloSessoes) com
+ * as tentativas de questões (state.tentativas) daquele dia, agrupadas por
+ * matéria/disciplina (comparação por nome normalizado, já que tentativas
+ * guardam a disciplina como texto livre e sessões guardam o nome da matéria
+ * do ciclo). É a fonte única do card "Relatório diário de estudos" do
+ * dashboard — sempre recalculada a partir do state atual, então basta
+ * chamar de novo (ex.: dentro de renderDashboard) para atualizar.
+ */
+function calcRelatorioDiario(dataISO = todayISO()) {
+  const norm = (s) => (s || '').trim().toLowerCase();
+  const sessoesDoDia = state.cicloSessoes.filter(s => s.data === dataISO);
+  const tentativasDoDia = state.tentativas.filter(t => t.data === dataISO);
+
+  const grupos = new Map(); // chave normalizada -> acumulador
+
+  function pegaGrupo(nomeOriginal) {
+    const nome = (nomeOriginal || '').trim() || '(Não informado)';
+    const chave = norm(nome);
+    if (!grupos.has(chave)) {
+      grupos.set(chave, {
+        nome, topicos: new Set(), tipos: new Set(),
+        minutos: 0, numQuestoes: 0, acertos: 0, erros: 0
+      });
+    }
+    return grupos.get(chave);
+  }
+
+  sessoesDoDia.forEach(s => {
+    const g = pegaGrupo(s.nome);
+    g.minutos += (s.minutos || 0);
+    if (s.topico) g.topicos.add(s.topico);
+    if (s.tipoEstudo) g.tipos.add(s.tipoEstudo);
+  });
+
+  tentativasDoDia.forEach(t => {
+    const g = pegaGrupo(t.disciplina);
+    g.numQuestoes += (Number(t.numQuestoes) || 0);
+    g.acertos += (Number(t.acertos) || 0);
+    g.erros += (Number(t.erros) || 0);
+    if (t.assunto) g.topicos.add(t.assunto);
+    if (t.tipo) g.tipos.add(t.tipo);
+  });
+
+  const materias = Array.from(grupos.values()).map(g => ({
+    nome: g.nome,
+    topicos: Array.from(g.topicos),
+    tipos: Array.from(g.tipos),
+    minutos: g.minutos,
+    numQuestoes: g.numQuestoes,
+    acertos: g.acertos,
+    erros: g.erros,
+    taxa: g.numQuestoes ? (g.acertos / g.numQuestoes) * 100 : 0
+  }));
+
+  // matérias com mais tempo estudado primeiro; empate desempata por nº de questões
+  materias.sort((a, b) => (b.minutos - a.minutos) || (b.numQuestoes - a.numQuestoes));
+
+  const totais = materias.reduce((acc, g) => {
+    acc.minutos += g.minutos;
+    acc.numQuestoes += g.numQuestoes;
+    acc.acertos += g.acertos;
+    acc.erros += g.erros;
+    return acc;
+  }, { minutos: 0, numQuestoes: 0, acertos: 0, erros: 0 });
+  totais.taxa = totais.numQuestoes ? (totais.acertos / totais.numQuestoes) * 100 : 0;
+
+  return { materias, totais };
+}
+
 /** Sequência de dias consecutivos (até hoje) com pelo menos 1 tentativa registrada */
 function calcSequenciaDias() {
   const diasComTentativa = new Set(state.tentativas.map(t => t.data));
@@ -598,6 +669,8 @@ function renderDashboard(view) {
       <div class="stat-card info"><div class="label">Tempo estudado hoje</div><div class="value">${_formatarMinutos(minutosHoje)}</div></div>
     </div>
 
+    <div class="card mb-12" id="card-relatorio-diario"></div>
+
     <div class="card mb-12" id="card-prioridade-revisao"></div>
 
     <div class="grid-2 mb-12">
@@ -681,6 +754,7 @@ function renderDashboard(view) {
   initDashboardEditalChart();
   renderStatsPorDisciplina();
   renderTempoPorTipoCicloDashboard();
+  renderRelatorioDiario();
   renderPrioridadeRevisao();
   renderCorrelacaoTipoTaxa();
 }
@@ -762,6 +836,93 @@ function renderCorrelacaoTipoTaxa() {
     <p class="text-muted" style="font-size:11.5px;margin-top:10px;margin-bottom:0;">
       Correlação, não causa: uma disciplina que você domina bem pode simplesmente precisar de menos exercícios e mais revisão, por exemplo.
     </p>
+  `;
+}
+
+/**
+ * Card "Relatório diário de estudos" — junta numa única tabela, por
+ * matéria, tudo que aconteceu HOJE: os tópicos e tipos de estudo vistos
+ * (tanto no Ciclo de Estudos quanto nas tentativas de questões), o tempo
+ * estudado (Ciclo de Estudos) e o desempenho em questões (tentativas).
+ * É sempre referente a hoje — mas como recalcula a cada renderDashboard(),
+ * fica "ao vivo": qualquer sessão do ciclo ou tentativa registrada agora
+ * aparece aqui assim que a tela for atualizada. Quando o filtro de período
+ * do dashboard também está em "Hoje", os cartões de resumo no topo batem
+ * exatamente com os totais mostrados aqui.
+ */
+function renderRelatorioDiario() {
+  const card = $('#card-relatorio-diario');
+  if (!card) return;
+
+  const hojeISO = todayISO();
+  const { materias, totais } = calcRelatorioDiario(hojeISO);
+  const filtroEhHoje = state.dashboardFiltro.tipo === 'hoje';
+
+  card.style.borderColor = filtroEhHoje ? 'var(--gold)' : '';
+
+  if (!materias.length) {
+    card.innerHTML = `
+      <div class="card-title">🗓️ Relatório diário de estudos — ${toBRDate(hojeISO)}</div>
+      <p class="text-muted" style="font-size:13.5px;margin-top:0;">
+        Nenhuma sessão do Ciclo de Estudos ou tentativa de questões registrada hoje ainda.
+        Assim que você estudar algo ou lançar questões, o resumo do dia aparece aqui, matéria por matéria.
+      </p>
+    `;
+    return;
+  }
+
+  card.innerHTML = `
+    <div class="card-title">🗓️ Relatório diário de estudos — ${toBRDate(hojeISO)}</div>
+    <p class="text-muted" style="font-size:12.5px;margin-top:-6px;margin-bottom:14px;">
+      Combina automaticamente as sessões do Ciclo de Estudos e as tentativas de questões registradas hoje, por matéria.
+      ${filtroEhHoje
+        ? 'O filtro de período acima está em "Hoje" — os cartões de resumo no topo mostram os mesmos totais.'
+        : 'Este resumo é sempre referente a hoje, independente do filtro de período escolhido acima.'}
+    </p>
+
+    <div class="stat-grid" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:16px;">
+      <div class="stat-card info"><div class="label">Tempo total hoje</div><div class="value" style="font-size:20px;">${_formatarMinutos(totais.minutos)}</div></div>
+      <div class="stat-card"><div class="label">Questões hoje</div><div class="value" style="font-size:20px;">${totais.numQuestoes}</div></div>
+      <div class="stat-card success"><div class="label">Certas</div><div class="value" style="font-size:20px;">${totais.acertos}</div></div>
+      <div class="stat-card danger"><div class="label">Erradas</div><div class="value" style="font-size:20px;">${totais.erros}</div></div>
+      <div class="stat-card gold"><div class="label">Taxa de acerto</div><div class="value" style="font-size:20px;">${fmtPct(totais.taxa)}</div></div>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Matéria</th>
+            <th>Tópico(s)</th>
+            <th>Tipo(s) de estudo</th>
+            <th>Tempo</th>
+            <th>Questões</th>
+            <th>Certas / Erradas</th>
+            <th>Taxa</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${materias.map(g => `
+            <tr>
+              <td style="white-space:normal;font-weight:600;">${escapeHtml(g.nome)}</td>
+              <td style="white-space:normal;max-width:220px;">${g.topicos.length ? g.topicos.map(tp => escapeHtml(tp)).join(', ') : '<span class="text-muted">-</span>'}</td>
+              <td style="white-space:normal;max-width:200px;">${g.tipos.length ? g.tipos.map(tp => `<span class="badge muted" style="margin:2px 4px 2px 0;display:inline-block;">${escapeHtml(tp)}</span>`).join('') : '<span class="text-muted">-</span>'}</td>
+              <td class="num">${g.minutos > 0 ? _formatarMinutos(g.minutos) : '-'}</td>
+              <td class="num">${g.numQuestoes || '-'}</td>
+              <td class="num">${g.numQuestoes ? `<span style="color:var(--success)">${g.acertos}</span> / <span style="color:var(--danger)">${g.erros}</span>` : '-'}</td>
+              <td>
+                ${g.numQuestoes ? `
+                  <div class="pct-bar-wrap">
+                    <div class="pct-bar"><span style="width:${g.taxa.toFixed(1)}%"></span></div>
+                    <span class="num">${fmtPct(g.taxa)}</span>
+                  </div>
+                ` : '<span class="text-muted">-</span>'}
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
   `;
 }
 
