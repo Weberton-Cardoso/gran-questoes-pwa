@@ -690,3 +690,56 @@ tr.row-motivo td{ padding-top:0; padding-bottom:8px; border-top:none; }
 .perfil-card{ border-color:var(--border); }
 .perfil-card.ativo{ border-color:var(--gold); }
 .perfil-card-acoes{ display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+
+/* =========================================================
+   REVISÃO GERAL PARA CELULAR — tudo mais compacto e com
+   toque maior, sem mudar a estrutura, só os espaçamentos,
+   tamanhos e o jeito que os elementos se agrupam.
+   ========================================================= */
+@media (max-width:600px){
+  .view{ padding:12px; }
+  .topbar{ padding:0 12px; height:56px; gap:10px; }
+  .topbar h1{ font-size:16px; }
+
+  .card{ padding:14px; border-radius:12px; }
+  .card-title{ font-size:12.5px; margin-bottom:10px; }
+  .card + .card, .card.mt-12, .card.mt-16{ margin-top:10px !important; }
+
+  .stat-grid{ grid-template-columns:repeat(2, 1fr); gap:8px; margin-bottom:14px; }
+  .stat-card{ padding:12px; }
+  .stat-card .label{ font-size:11.5px; }
+  .stat-card .value{ font-size:20px; margin-top:4px; }
+
+  .grid-2, .grid-3{ gap:10px; }
+
+  .btn{ padding:9px 13px; font-size:13.5px; }
+  .btn-sm{ padding:7px 10px; font-size:12.5px; }
+
+  /* Fileira de ações das disciplinas do Ciclo (Iniciar / Editar tempo /
+     Corrigir total / Registrar tipo / Registrar tópico): em vez de
+     quebrar linha de um jeito desigual, vira uma grade organizada de
+     2 colunas com botões do mesmo tamanho. */
+  .ciclo-materia-acoes{
+    display:grid; grid-template-columns:1fr 1fr; gap:8px;
+  }
+  .ciclo-materia-acoes .btn{
+    width:100%; justify-content:center; text-align:center;
+  }
+  .ciclo-materia-row{ padding:12px; }
+  .ciclo-materia-nome{ font-size:13.5px; }
+
+  .filter-bar{ gap:6px; }
+  .chip{ padding:7px 12px; font-size:12.5px; }
+
+  /* Tabelas (Estatísticas, Relatório diário): fonte menor e menos
+     espaçamento, pra caber mais coluna antes de precisar rolar. */
+  table{ font-size:12.5px; }
+  thead th{ padding:8px 8px; font-size:11px; }
+  tbody td{ padding:9px 8px; }
+
+  .modal{ padding:16px; max-width:100%; border-radius:16px 16px 0 0; }
+  .modal h2{ font-size:16px; margin-bottom:12px; }
+  .form-row{ margin-bottom:10px; }
+
+  .perfil-selector-btn{ max-width:88px; }
+}
