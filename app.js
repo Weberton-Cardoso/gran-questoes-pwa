@@ -843,49 +843,68 @@ function renderCorrelacaoTipoTaxa() {
 }
 
 /**
+ * Data atualmente selecionada no "Relatório diário de estudos" — controla
+ * qual dia está sendo exibido no card. Começa sempre em hoje ao carregar o
+ * app; navegar com as setas ou o campo de data só muda esse estado local
+ * (não mexe no filtro geral do Dashboard).
+ */
+let _relatorioDiarioData = todayISO();
+
+/**
  * Card "Relatório diário de estudos" — junta numa única tabela, por
- * matéria, tudo que aconteceu HOJE: os tópicos e tipos de estudo vistos
- * (tanto no Ciclo de Estudos quanto nas tentativas de questões), o tempo
- * estudado (Ciclo de Estudos) e o desempenho em questões (tentativas).
- * É sempre referente a hoje — mas como recalcula a cada renderDashboard(),
- * fica "ao vivo": qualquer sessão do ciclo ou tentativa registrada agora
- * aparece aqui assim que a tela for atualizada. Quando o filtro de período
- * do dashboard também está em "Hoje", os cartões de resumo no topo batem
- * exatamente com os totais mostrados aqui.
+ * matéria, tudo que aconteceu num dia (por padrão hoje): os tópicos e
+ * tipos de estudo vistos (tanto no Ciclo de Estudos quanto nas tentativas
+ * de questões), o tempo estudado (Ciclo de Estudos) e o desempenho em
+ * questões (tentativas). Tem setas "◀ ▶" e um campo de data pra navegar
+ * entre dias anteriores — a seta "▶" fica desabilitada em dias futuros.
  */
 function renderRelatorioDiario() {
   const card = $('#card-relatorio-diario');
   if (!card) return;
 
-  const hojeISO = todayISO();
-  const { materias, totais } = calcRelatorioDiario(hojeISO);
+  const dataSelecionada = _relatorioDiarioData;
+  const { materias, totais } = calcRelatorioDiario(dataSelecionada);
   const filtroEhHoje = state.dashboardFiltro.tipo === 'hoje';
+  const ehHoje = dataSelecionada === todayISO();
 
-  card.style.borderColor = filtroEhHoje ? 'var(--gold)' : '';
+  card.style.borderColor = (filtroEhHoje && ehHoje) ? 'var(--gold)' : '';
+
+  const navegacaoHTML = `
+    <div class="flex" style="justify-content:center;align-items:center;gap:10px;margin-bottom:12px;">
+      <button class="btn btn-sm btn-ghost" id="btn-relatorio-dia-anterior" title="Dia anterior">◀</button>
+      <input type="date" id="input-relatorio-data" value="${dataSelecionada}" max="${todayISO()}" style="text-align:center;">
+      <button class="btn btn-sm btn-ghost" id="btn-relatorio-dia-seguinte" title="Próximo dia" ${ehHoje ? 'disabled' : ''}>▶</button>
+      ${!ehHoje ? `<button class="btn btn-sm btn-ghost" id="btn-relatorio-hoje">Hoje</button>` : ''}
+    </div>
+  `;
 
   if (!materias.length) {
     card.innerHTML = `
-      <div class="card-title">🗓️ Relatório diário de estudos — ${toBRDate(hojeISO)}</div>
+      <div class="card-title">🗓️ Relatório diário de estudos — ${toBRDate(dataSelecionada)}</div>
+      ${navegacaoHTML}
       <p class="text-muted" style="font-size:13.5px;margin-top:0;">
-        Nenhuma sessão do Ciclo de Estudos ou tentativa de questões registrada hoje ainda.
-        Assim que você estudar algo ou lançar questões, o resumo do dia aparece aqui, matéria por matéria.
+        ${ehHoje
+          ? 'Nenhuma sessão do Ciclo de Estudos ou tentativa de questões registrada hoje ainda. Assim que você estudar algo ou lançar questões, o resumo do dia aparece aqui, matéria por matéria.'
+          : 'Nenhuma sessão do Ciclo de Estudos ou tentativa de questões registrada nesse dia.'}
       </p>
     `;
+    _wireRelatorioDiarioNav();
     return;
   }
 
   card.innerHTML = `
-    <div class="card-title">🗓️ Relatório diário de estudos — ${toBRDate(hojeISO)}</div>
+    <div class="card-title">🗓️ Relatório diário de estudos — ${toBRDate(dataSelecionada)}</div>
+    ${navegacaoHTML}
     <p class="text-muted" style="font-size:12.5px;margin-top:-6px;margin-bottom:14px;">
-      Combina automaticamente as sessões do Ciclo de Estudos e as tentativas de questões registradas hoje, por matéria.
-      ${filtroEhHoje
+      Combina automaticamente as sessões do Ciclo de Estudos e as tentativas de questões registradas nesse dia, por matéria.
+      ${filtroEhHoje && ehHoje
         ? 'O filtro de período acima está em "Hoje" — os cartões de resumo no topo mostram os mesmos totais.'
-        : 'Este resumo é sempre referente a hoje, independente do filtro de período escolhido acima.'}
+        : 'Este resumo é referente ao dia selecionado acima, independente do filtro de período escolhido no topo do Dashboard.'}
     </p>
 
     <div class="stat-grid" style="grid-template-columns:repeat(auto-fit,minmax(120px,1fr));margin-bottom:16px;">
-      <div class="stat-card info"><div class="label">Tempo total hoje</div><div class="value" style="font-size:20px;">${_formatarMinutos(totais.minutos)}</div></div>
-      <div class="stat-card"><div class="label">Questões hoje</div><div class="value" style="font-size:20px;">${totais.numQuestoes}</div></div>
+      <div class="stat-card info"><div class="label">Tempo total no dia</div><div class="value" style="font-size:20px;">${_formatarMinutos(totais.minutos)}</div></div>
+      <div class="stat-card"><div class="label">Questões no dia</div><div class="value" style="font-size:20px;">${totais.numQuestoes}</div></div>
       <div class="stat-card success"><div class="label">Certas</div><div class="value" style="font-size:20px;">${totais.acertos}</div></div>
       <div class="stat-card danger"><div class="label">Erradas</div><div class="value" style="font-size:20px;">${totais.erros}</div></div>
       <div class="stat-card gold"><div class="label">Taxa de acerto</div><div class="value" style="font-size:20px;">${fmtPct(totais.taxa)}</div></div>
@@ -927,6 +946,38 @@ function renderRelatorioDiario() {
       </table>
     </div>
   `;
+  _wireRelatorioDiarioNav();
+}
+
+/** Conecta as setas de navegação e o campo de data do relatório diário —
+ *  qualquer mudança só re-renderiza esse card específico, sem recarregar
+ *  o resto do Dashboard. */
+function _wireRelatorioDiarioNav() {
+  const somarDias = (iso, n) => {
+    const d = new Date(iso + 'T00:00:00');
+    d.setDate(d.getDate() + n);
+    return toISODate(d);
+  };
+
+  $('#btn-relatorio-dia-anterior')?.addEventListener('click', () => {
+    _relatorioDiarioData = somarDias(_relatorioDiarioData, -1);
+    renderRelatorioDiario();
+  });
+  $('#btn-relatorio-dia-seguinte')?.addEventListener('click', () => {
+    if (_relatorioDiarioData >= todayISO()) return;
+    _relatorioDiarioData = somarDias(_relatorioDiarioData, 1);
+    renderRelatorioDiario();
+  });
+  $('#btn-relatorio-hoje')?.addEventListener('click', () => {
+    _relatorioDiarioData = todayISO();
+    renderRelatorioDiario();
+  });
+  $('#input-relatorio-data')?.addEventListener('change', (e) => {
+    if (e.target.value) {
+      _relatorioDiarioData = e.target.value;
+      renderRelatorioDiario();
+    }
+  });
 }
 
 /**
