@@ -32,10 +32,21 @@
  *     salvo automaticamente aqui (mantendo só os 10 mais recentes), para
  *     servir de rede de segurança caso uma sincronização ou importação dê
  *     errado. Ver db.exportAllRaw / db.importAllRaw / db.criarBackupLocalAutomatico.
+ * v9: adiciona o CADERNO DE RESUMOS. Cria o store "resumos" (com escopo por
+ *     perfil, igual tentativas/editais): cada resumo é gerado a partir de
+ *     UMA questão resolvida (tela "Resolver com IA") e fica vinculado à
+ *     tentativa que o originou via tentativaId. Guarda duas versões do
+ *     texto — "bruto" (explicação da teoria) e "condensado" (estilo Anki) —
+ *     mais o controle de envio pro Anki (enviadoAnki/ankiDeck), preparando
+ *     terreno pra integração com AnkiConnect nas próximas fases. As
+ *     tentativas também passam a poder guardar o enunciado/alternativas da
+ *     questão de origem e um resultado de 3 estados ('certa'|'errada'|
+ *     'branco') — isso é só um uso novo de campos livres no mesmo store de
+ *     tentativas, não exige migração de schema.
  */
 
 const DB_NAME = 'TrilhaAprovacaoDB';
-const DB_VERSION = 8;
+const DB_VERSION = 9;
 
 const STORES = {
   tentativas: 'tentativas',
@@ -46,14 +57,15 @@ const STORES = {
   cicloSessoes: 'cicloSessoes',
   cicloConfig: 'cicloConfig',
   perfis: 'perfis',
-  backupsLocais: 'backupsLocais'
+  backupsLocais: 'backupsLocais',
+  resumos: 'resumos'
 };
 
 /** Stores que pertencem a um perfil de estatísticas específico — getAll/add/clear
  *  destes stores são automaticamente filtrados/marcados pelo perfil ativo. */
 const PERFIL_SCOPED_STORES = new Set([
   STORES.tentativas, STORES.editais, STORES.simulados,
-  STORES.ciclos, STORES.cicloMaterias, STORES.cicloSessoes
+  STORES.ciclos, STORES.cicloMaterias, STORES.cicloSessoes, STORES.resumos
 ]);
 
 const TIPOS_TENTATIVA = [
@@ -61,7 +73,8 @@ const TIPOS_TENTATIVA = [
   'Revisão',
   'Refazendo questões',
   'Refazendo questões erradas',
-  'Simulado'
+  'Simulado',
+  'Questão avulsa (Resolver com IA)'
 ];
 
 const STATUS_TOPICO = ['nao_iniciado', 'em_estudo', 'em_revisao', 'dominado'];
@@ -252,6 +265,14 @@ function openDB() {
         const backupsStore = db.createObjectStore(STORES.backupsLocais, { keyPath: 'id', autoIncrement: true });
         backupsStore.createIndex('criadoEm', 'criadoEm', { unique: false });
       }
+      // v9: Caderno de Resumos — cada resumo é gerado a partir de uma
+      // questão resolvida e fica vinculado à tentativa de origem.
+      if (!db.objectStoreNames.contains(STORES.resumos)) {
+        const resumosStore = db.createObjectStore(STORES.resumos, { keyPath: 'id', autoIncrement: true });
+        resumosStore.createIndex('tentativaId', 'tentativaId', { unique: false });
+        resumosStore.createIndex('data', 'data', { unique: false });
+        resumosStore.createIndex('materia', 'materia', { unique: false });
+      }
     };
 
     req.onsuccess = (event) => resolve(event.target.result);
@@ -420,6 +441,17 @@ const db = {
     clear: () => db.clear(STORES.cicloSessoes)
   },
 
+  // Caderno de Resumos — cada resumo vem de UMA tentativa (questão) e fica
+  // ligado a ela via tentativaId. Ver comentário v9 no topo do arquivo.
+  resumos: {
+    add: (r) => db.add(STORES.resumos, r),
+    update: (r) => db.update(STORES.resumos, r),
+    remove: (id) => db.remove(STORES.resumos, id),
+    get: (id) => db.get(STORES.resumos, id),
+    getAll: () => db.getAll(STORES.resumos),
+    clear: () => db.clear(STORES.resumos)
+  },
+
   // Perfis de estatísticas (não filtrados por perfil — é a própria lista deles).
   perfis: {
     add: (p) => db.add(STORES.perfis, p),
@@ -443,19 +475,20 @@ const db = {
   },
 
   async exportAll() {
-    const [tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes] = await Promise.all([
+    const [tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes, resumos] = await Promise.all([
       db.getAll(STORES.tentativas),
       db.getAll(STORES.editais),
       db.getAll(STORES.simulados),
       db.getAll(STORES.ciclos),
       db.getAll(STORES.cicloMaterias),
-      db.getAll(STORES.cicloSessoes)
+      db.getAll(STORES.cicloSessoes),
+      db.getAll(STORES.resumos)
     ]);
     return {
       versao: DB_VERSION,
       exportadoEm: new Date().toISOString(),
       alteradoEm: db.getUltimaAlteracaoLocal(),
-      tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes
+      tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes, resumos
     };
   },
 
@@ -464,20 +497,21 @@ const db = {
    *  ser usado para um backup manual "de tudo", diferente do backup normal
    *  que exporta só o perfil ativo). */
   async exportAllRaw() {
-    const [perfis, tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes] = await Promise.all([
+    const [perfis, tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes, resumos] = await Promise.all([
       tx(STORES.perfis, 'readonly', (store) => store.getAll()),
       tx(STORES.tentativas, 'readonly', (store) => store.getAll()),
       tx(STORES.editais, 'readonly', (store) => store.getAll()),
       tx(STORES.simulados, 'readonly', (store) => store.getAll()),
       tx(STORES.ciclos, 'readonly', (store) => store.getAll()),
       tx(STORES.cicloMaterias, 'readonly', (store) => store.getAll()),
-      tx(STORES.cicloSessoes, 'readonly', (store) => store.getAll())
+      tx(STORES.cicloSessoes, 'readonly', (store) => store.getAll()),
+      tx(STORES.resumos, 'readonly', (store) => store.getAll())
     ]);
     return {
       versao: DB_VERSION,
       tipo: 'completo',
       exportadoEm: new Date().toISOString(),
-      perfis, tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes
+      perfis, tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes, resumos
     };
   },
 
@@ -492,7 +526,8 @@ const db = {
       tx(STORES.simulados, 'readwrite', (store) => store.clear()),
       tx(STORES.ciclos, 'readwrite', (store) => store.clear()),
       tx(STORES.cicloMaterias, 'readwrite', (store) => store.clear()),
-      tx(STORES.cicloSessoes, 'readwrite', (store) => store.clear())
+      tx(STORES.cicloSessoes, 'readwrite', (store) => store.clear()),
+      tx(STORES.resumos, 'readwrite', (store) => store.clear())
     ]);
 
     const restaurar = (storeName, lista) =>
@@ -505,6 +540,7 @@ const db = {
     await restaurar(STORES.ciclos, dados.ciclos);
     await restaurar(STORES.cicloMaterias, dados.cicloMaterias);
     await restaurar(STORES.cicloSessoes, dados.cicloSessoes);
+    await restaurar(STORES.resumos, dados.resumos);
   },
 
   /** Encontra e corrige registros "invisíveis" — itens de stores com
@@ -519,7 +555,7 @@ const db = {
 
     const stores = [
       STORES.tentativas, STORES.editais, STORES.simulados,
-      STORES.ciclos, STORES.cicloMaterias, STORES.cicloSessoes
+      STORES.ciclos, STORES.cicloMaterias, STORES.cicloSessoes, STORES.resumos
     ];
 
     let totalReparados = 0;
@@ -577,7 +613,8 @@ const db = {
         db.clear(STORES.ciclos),
         db.clear(STORES.cicloMaterias),
         db.clear(STORES.cicloSessoes),
-        db.clear(STORES.cicloConfig)
+        db.clear(STORES.cicloConfig),
+        db.clear(STORES.resumos)
       ]);
     }
 
@@ -603,10 +640,16 @@ const db = {
     const listaCiclos = Array.isArray(data.ciclos) ? data.ciclos : [];
     const listaCicloMaterias = Array.isArray(data.cicloMaterias) ? data.cicloMaterias : [];
     const listaCicloSessoes = Array.isArray(data.cicloSessoes) ? data.cicloSessoes : [];
+    const listaResumos = Array.isArray(data.resumos) ? data.resumos : [];
 
+    // Mapa do id antigo de cada tentativa -> novo id gerado. Necessário pra
+    // resumos (Caderno) não perderem o vínculo com a questão de origem a
+    // cada sincronização/importação, igual já fazemos com cicloMateriaId.
+    const mapaTentativaId = {};
     for (const t of listaTentativas) {
       const { id, perfilId, ...rest } = t;
-      await db.add(STORES.tentativas, rest);
+      const novoId = await db.add(STORES.tentativas, rest);
+      if (id != null) mapaTentativaId[id] = novoId;
     }
     for (const e of listaEditais) {
       const { id, perfilId, ...rest } = e;
@@ -659,6 +702,17 @@ const db = {
       rest.cicloMateriaId = novoCicloMateriaId;
       await db.add(STORES.cicloSessoes, rest);
     }
+
+    for (const r of listaResumos) {
+      const { id, perfilId, tentativaId, ...rest } = r;
+      // Diferente da sessão do ciclo, um resumo órfão (sem tentativa
+      // correspondente) ainda tem valor por si só — o texto continua útil
+      // no Caderno mesmo sem o vínculo, então mantém em vez de descartar.
+      rest.tentativaId = tentativaId != null && mapaTentativaId[tentativaId] != null
+        ? mapaTentativaId[tentativaId]
+        : null;
+      await db.add(STORES.resumos, rest);
+    }
   },
 
   async zerarTudo() {
@@ -671,7 +725,8 @@ const db = {
       db.clear(STORES.ciclos),
       db.clear(STORES.cicloMaterias),
       db.clear(STORES.cicloSessoes),
-      db.clear(STORES.cicloConfig)
+      db.clear(STORES.cicloConfig),
+      db.clear(STORES.resumos)
     ]);
   }
 };

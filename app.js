@@ -106,15 +106,16 @@ const state = {
   cicloMaterias: [],
   cicloSessoes: [],
   perfis: [],
+  resumos: [],
   dashboardFiltro: { tipo: '7d', inicio: null, fim: null },
   statsDisciplinaFiltro: { tipo: 'tudo', inicio: null, fim: null, disciplina: 'todas' }
 };
 
 async function reloadState() {
-  const [tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes, perfis] = await Promise.all([
+  const [tentativas, editais, simulados, ciclos, cicloMaterias, cicloSessoes, perfis, resumos] = await Promise.all([
     db.tentativas.getAll(), db.editais.getAll(), db.simulados.getAll(),
     db.ciclos.getAll(), db.cicloMaterias.getAll(), db.cicloSessoes.getAll(),
-    db.perfis.getAll()
+    db.perfis.getAll(), db.resumos.getAll()
   ]);
   state.perfis = perfis.sort((a, b) => a.ordem - b.ordem);
   state.ciclos = ciclos.sort((a, b) => a.ordem - b.ordem);
@@ -123,6 +124,7 @@ async function reloadState() {
   state.tentativas = tentativas;
   state.editais = editais;
   state.simulados = simulados;
+  state.resumos = resumos;
 }
 
 /** Disciplinas sugeridas por padrão no autocomplete, mesmo antes de qualquer
@@ -339,6 +341,8 @@ function updateActiveNav(route) {
 const PAGE_TITLES = {
   'dashboard': 'Dashboard',
   'tentativas': 'Tentativas',
+  'resolver-ia': 'Resolver com IA',
+  'caderno': 'Caderno de Resumos',
   'importar-historico': 'Importar Histórico',
   'ciclo': 'Ciclo de Estudos',
   'estatisticas/disciplinas': 'Estatísticas por Disciplina',
@@ -376,6 +380,14 @@ async function router() {
     $('#page-title').textContent = PAGE_TITLES['tentativas'];
     updateActiveNav('tentativas');
     renderTentativas(view);
+  } else if (base === 'resolver-ia') {
+    $('#page-title').textContent = PAGE_TITLES['resolver-ia'];
+    updateActiveNav('resolver-ia');
+    renderResolverIA(view);
+  } else if (base === 'caderno') {
+    $('#page-title').textContent = PAGE_TITLES['caderno'];
+    updateActiveNav('caderno');
+    renderCaderno(view);
   } else if (base === 'importar-historico') {
     $('#page-title').textContent = PAGE_TITLES['importar-historico'];
     updateActiveNav('importar-historico');
@@ -462,14 +474,20 @@ function resolverPeriodo(filtro) {
   }
 }
 
-/** Resumo agregado de uma lista de tentativas (soma questões/acertos/erros) */
+/** Resumo agregado de uma lista de tentativas (soma questões/acertos/erros).
+ *  A taxa de acerto exclui questões em branco do denominador — deixar em
+ *  branco não é a mesma coisa que errar, então não pode penalizar a taxa
+ *  como se fosse erro. "brancos" é derivado (total − certas − erradas), não
+ *  precisa de um campo próprio salvo em cada tentativa. */
 function calcResumo(lista) {
   const tentativas = lista.length;
   const total = lista.reduce((acc, t) => acc + (Number(t.numQuestoes) || 0), 0);
   const certas = lista.reduce((acc, t) => acc + (Number(t.acertos) || 0), 0);
   const erradas = lista.reduce((acc, t) => acc + (Number(t.erros) || 0), 0);
-  const taxa = total ? (certas / total) * 100 : 0;
-  return { tentativas, total, certas, erradas, taxa };
+  const brancos = Math.max(0, total - certas - erradas);
+  const respondidas = certas + erradas;
+  const taxa = respondidas ? (certas / respondidas) * 100 : 0;
+  return { tentativas, total, certas, erradas, brancos, taxa };
 }
 
 /**
@@ -1594,6 +1612,527 @@ function openTentativaModal(tentativa = null) {
     await reloadState();
     router();
   });
+}
+
+/* ============================================================
+   INTEGRAÇÃO COM IA (Firebase AI Logic) — GERAÇÃO DE RESUMO
+   ============================================================
+   Esta função só monta o prompt e faz o parse da resposta. A CHAMADA em si
+   pro Gemini fica isolada em window.chamarGeminiResumo(prompt) — de
+   propósito, pra essa tela funcionar (com erro amigável) mesmo antes do
+   Firebase AI Logic estar configurado, e pra plugar a IA de verdade não
+   exigir mexer em mais nada aqui.
+
+   O que window.chamarGeminiResumo deveria fazer, depois de configurar o
+   Firebase AI Logic no Console (provedor "Gemini Developer API", grátis):
+
+     import { getAI, getGenerativeModel, GoogleAIBackend } from "firebase/ai";
+     const ai = getAI(app, { backend: new GoogleAIBackend() }); // 'app' = seu app do Firebase já inicializado
+     const model = getGenerativeModel(ai, { model: "gemini-3.1-flash-lite" }); // conferir nome do modelo vigente
+
+     window.chamarGeminiResumo = async function(prompt) {
+       const resultado = await model.generateContent(prompt);
+       return resultado.response.text();
+     };
+   ============================================================ */
+
+function _montarPromptResumo({ enunciado, gabaritoOficial, disciplina, assunto }) {
+  return `Você vai gerar dois resumos sobre o tema da questão abaixo, no estilo de um caderno de estudos para concurso público — NÃO no formato de flashcard pergunta/resposta.
+
+MATÉRIA: ${disciplina || '(não informado)'}
+TÓPICO: ${assunto || '(não informado)'}
+QUESTÃO:
+${enunciado}
+
+${gabaritoOficial
+    ? `GABARITO OFICIAL CONFIRMADO: ${gabaritoOficial}`
+    : 'GABARITO: não informado — analise a questão e indique qual alternativa você acredita ser a correta. Isso é só uma sugestão, pode estar errada.'}
+
+Gere:
+1. "bruto": explicação da teoria por trás da questão, em 1-2 parágrafos, estilo aula resumida, direto ao ponto.
+2. "condensado": versão ultra-compacta, estilo "Comp. privativa U = art.22 · Comum = art.23 (todos entes) · Concorrente = art.24" — frases curtas separadas por "·", sem pergunta, sem introdução, só o essencial pra fixação.
+${gabaritoOficial ? '' : '3. "gabaritoSugerido": a letra/valor da alternativa que você acredita ser a correta, ou null se não der pra determinar.'}
+
+Responda SOMENTE em JSON válido, sem markdown, sem texto fora do JSON:
+{"bruto": "...", "condensado": "..."${gabaritoOficial ? '' : ', "gabaritoSugerido": "..."'}}`;
+}
+
+/** Chama a IA e devolve { bruto, condensado, gabaritoSugerido }. Lança erro
+ *  (com mensagem amigável) se a IA não estiver configurada ou responder em
+ *  formato inesperado — quem chama decide como mostrar isso ao usuário. */
+async function gerarResumoIA(dados) {
+  if (typeof window.chamarGeminiResumo !== 'function') {
+    throw new Error('IA ainda não configurada nesse dispositivo (falta configurar o Firebase AI Logic — ver comentário no código).');
+  }
+  const prompt = _montarPromptResumo(dados);
+  const textoResposta = await window.chamarGeminiResumo(prompt);
+  const limpo = String(textoResposta || '').replace(/```json|```/g, '').trim();
+  let parsed;
+  try {
+    parsed = JSON.parse(limpo);
+  } catch (err) {
+    throw new Error('A IA respondeu num formato inesperado. Tente gerar de novo.');
+  }
+  return {
+    bruto: parsed.bruto || '',
+    condensado: parsed.condensado || '',
+    gabaritoSugerido: parsed.gabaritoSugerido || null
+  };
+}
+
+/* ============================================================
+   TELA: RESOLVER COM IA
+   ============================================================
+   Fluxo: cola a questão -> IA gera explicação + resumo condensado -> você
+   confirma o gabarito (informado ou corrigindo a sugestão da IA) e marca o
+   resultado (certa/errada/branco) -> salva. Nada é gravado no banco antes
+   dessa confirmação. Sem limite de questões por sessão — o contador do
+   rodapé é só informativo, você para quando quiser.
+   ============================================================ */
+
+// Dados da matéria/tópico/banca/concurso ficam persistentes entre uma
+// questão e outra da mesma sessão (não precisa redigitar a cada questão).
+let _resolverIASessao = { disciplina: '', assunto: '', banca: '', concurso: '' };
+// Questão atual sendo resolvida: null enquanto não gera nenhum resumo ainda.
+let _resolverIAAtual = null;
+// Só contagem visual da sessão (não persiste — reseta ao recarregar a página).
+let _resolverIAContagem = { certas: 0, erradas: 0, brancos: 0 };
+
+function renderResolverIA(view) {
+  view.innerHTML = `
+    <div class="card mb-12">
+      <div class="card-title" style="margin-bottom:12px;">Matéria da questão</div>
+      <div class="form-grid-2">
+        <div class="form-row">
+          <label>Disciplina</label>
+          <div class="autocomplete-wrap">
+            <input type="text" id="ia-disciplina" autocomplete="off" value="${escapeHtml(_resolverIASessao.disciplina)}" placeholder="Ex: Direito Constitucional">
+          </div>
+        </div>
+        <div class="form-row">
+          <label>Tópico</label>
+          <div class="autocomplete-wrap">
+            <input type="text" id="ia-assunto" autocomplete="off" value="${escapeHtml(_resolverIASessao.assunto)}" placeholder="Ex: Organização do Estado">
+          </div>
+        </div>
+      </div>
+      <div class="form-grid-2">
+        <div class="form-row">
+          <label>Banca (opcional)</label>
+          <div class="autocomplete-wrap">
+            <input type="text" id="ia-banca" autocomplete="off" value="${escapeHtml(_resolverIASessao.banca)}" placeholder="Ex: CESPE/CEBRASPE">
+          </div>
+        </div>
+        <div class="form-row">
+          <label>Concurso (opcional)</label>
+          <div class="autocomplete-wrap">
+            <input type="text" id="ia-concurso" autocomplete="off" value="${escapeHtml(_resolverIASessao.concurso)}" placeholder="Ex: TCDF">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card mb-12">
+      <div class="card-title" style="margin-bottom:12px;">Questão</div>
+      <div class="form-row">
+        <label>Cole aqui o enunciado e as alternativas</label>
+        <textarea id="ia-enunciado" rows="7" placeholder="Cole a questão completa...">${escapeHtml(_resolverIAAtual?.enunciado || '')}</textarea>
+      </div>
+      <div class="form-grid-2">
+        <div class="form-row">
+          <label>Gabarito oficial (se já souber) — opcional</label>
+          <input type="text" id="ia-gabarito-oficial" value="${escapeHtml(_resolverIAAtual?.gabaritoOficial || '')}" placeholder="Ex: C, ou 'Certo'">
+        </div>
+        <div class="form-row">
+          <label>Sua resposta marcada (opcional)</label>
+          <input type="text" id="ia-resposta-marcada" value="${escapeHtml(_resolverIAAtual?.respostaMarcada || '')}" placeholder="Ex: A">
+        </div>
+      </div>
+      <button class="btn btn-primary btn-block" id="btn-gerar-resumo-ia">
+        ${_resolverIAAtual?.bruto ? '🔄 Gerar de novo' : '✨ Gerar explicação com IA'}
+      </button>
+    </div>
+
+    <div id="ia-resultado-wrap"></div>
+
+    <div class="card" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+      <div class="text-muted" style="font-size:13px;">
+        Nesta sessão: <b style="color:var(--text);">${_resolverIAContagem.certas + _resolverIAContagem.erradas + _resolverIAContagem.brancos}</b> questões ·
+        <span style="color:var(--success)">${_resolverIAContagem.certas} certas</span> ·
+        <span style="color:var(--danger)">${_resolverIAContagem.erradas} erradas</span> ·
+        ${_resolverIAContagem.brancos} em branco
+      </div>
+      <button class="btn btn-ghost btn-sm" id="btn-finalizar-sessao-ia">Finalizar por aqui → ver Caderno</button>
+    </div>
+  `;
+
+  attachAutocomplete($('#ia-disciplina'), valoresUnicos('disciplina'));
+  attachAutocomplete($('#ia-assunto'), () => valoresAssuntoParaDisciplina($('#ia-disciplina').value));
+  attachAutocomplete($('#ia-banca'), valoresUnicos('banca'));
+  attachAutocomplete($('#ia-concurso'), valoresUnicos('concurso'));
+
+  ['disciplina', 'assunto', 'banca', 'concurso'].forEach(campo => {
+    $(`#ia-${campo}`).addEventListener('change', (e) => { _resolverIASessao[campo] = e.target.value.trim(); });
+  });
+
+  $('#btn-finalizar-sessao-ia').addEventListener('click', () => { location.hash = '#/caderno'; });
+
+  $('#btn-gerar-resumo-ia').addEventListener('click', async () => {
+    const enunciado = $('#ia-enunciado').value.trim();
+    if (!enunciado) { showToast('Cole o enunciado da questão primeiro.', 'danger'); return; }
+
+    const gabaritoOficial = $('#ia-gabarito-oficial').value.trim();
+    const respostaMarcada = $('#ia-resposta-marcada').value.trim();
+    const disciplina = $('#ia-disciplina').value.trim();
+    const assunto = $('#ia-assunto').value.trim();
+
+    const btn = $('#btn-gerar-resumo-ia');
+    btn.disabled = true;
+    btn.textContent = 'Gerando...';
+
+    try {
+      const ia = await gerarResumoIA({ enunciado, gabaritoOficial, disciplina, assunto });
+      _resolverIAAtual = {
+        enunciado, gabaritoOficial, respostaMarcada,
+        bruto: ia.bruto,
+        condensado: ia.condensado,
+        gabaritoSugerido: ia.gabaritoSugerido,
+        gabaritoConfirmado: gabaritoOficial || ia.gabaritoSugerido || '',
+        resultado: null
+      };
+      renderResolverIA(view);
+    } catch (err) {
+      showToast(err.message || 'Não foi possível gerar o resumo agora.', 'danger');
+      btn.disabled = false;
+      btn.textContent = '✨ Gerar explicação com IA';
+    }
+  });
+
+  _renderResolverIAResultado(view);
+}
+
+function _renderResolverIAResultado(view) {
+  const wrap = $('#ia-resultado-wrap');
+  if (!wrap || !_resolverIAAtual || !_resolverIAAtual.bruto) { if (wrap) wrap.innerHTML = ''; return; }
+
+  const r = _resolverIAAtual;
+  const foiInformado = !!r.gabaritoOficial;
+
+  wrap.innerHTML = `
+    <div class="card mb-12">
+      <div class="card-title" style="margin-bottom:10px;">Explicação gerada</div>
+
+      ${foiInformado
+        ? `<span class="badge success" style="margin-bottom:10px;display:inline-block;">Gabarito informado: ${escapeHtml(r.gabaritoOficial)}</span>`
+        : `<span class="badge muted" style="margin-bottom:10px;display:inline-block;">🤖 IA sugere: ${escapeHtml(r.gabaritoSugerido || '—')} (confirme antes de salvar)</span>`
+      }
+
+      <p class="texto-resumo-bruto" style="line-height:1.55;font-size:13.5px;color:var(--text);margin:8px 0 14px;">${escapeHtml(r.bruto)}</p>
+
+      <div style="border-left:2px solid var(--gold);padding-left:10px;color:var(--text-muted);font-size:13px;margin-bottom:16px;">
+        📎 ${escapeHtml(r.condensado)}
+      </div>
+
+      <div class="form-grid-2">
+        <div class="form-row">
+          <label>Gabarito confirmado (obrigatório pra salvar)</label>
+          <input type="text" id="ia-gabarito-confirmado" value="${escapeHtml(r.gabaritoConfirmado || '')}" placeholder="Ex: C">
+        </div>
+        <div class="form-row" style="align-self:flex-end;">
+          <button class="btn btn-sm" id="btn-regenerar-com-gabarito">🔄 Regenerar explicação com esse gabarito</button>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <label>Como foi essa questão?</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+          <button class="btn ${r.resultado === 'certa' ? 'btn-primary' : ''}" data-resultado="certa">✅ Acertei</button>
+          <button class="btn ${r.resultado === 'errada' ? 'btn-primary' : ''}" data-resultado="errada">❌ Errei</button>
+          <button class="btn ${r.resultado === 'branco' ? 'btn-primary' : ''}" data-resultado="branco">⬜ Deixei em branco</button>
+        </div>
+      </div>
+
+      <div class="modal-actions" style="margin-top:16px;">
+        <button class="btn btn-ghost" id="btn-descartar-ia">Descartar</button>
+        <button class="btn btn-primary btn-block" id="btn-salvar-ia" ${(!r.resultado) ? 'disabled' : ''}>Salvar e ir pra próxima questão</button>
+      </div>
+    </div>
+  `;
+
+  $$('[data-resultado]', wrap).forEach(btn => btn.addEventListener('click', () => {
+    _resolverIAAtual.resultado = btn.dataset.resultado;
+    _renderResolverIAResultado(view);
+  }));
+
+  $('#ia-gabarito-confirmado').addEventListener('change', (e) => {
+    _resolverIAAtual.gabaritoConfirmado = e.target.value.trim();
+  });
+
+  $('#btn-regenerar-com-gabarito').addEventListener('click', async () => {
+    const gabaritoCorrigido = $('#ia-gabarito-confirmado').value.trim();
+    if (!gabaritoCorrigido) { showToast('Informe o gabarito antes de regenerar.', 'danger'); return; }
+    const btn = $('#btn-regenerar-com-gabarito');
+    btn.disabled = true;
+    btn.textContent = 'Regenerando...';
+    try {
+      const ia = await gerarResumoIA({
+        enunciado: r.enunciado,
+        gabaritoOficial: gabaritoCorrigido,
+        disciplina: $('#ia-disciplina').value.trim(),
+        assunto: $('#ia-assunto').value.trim()
+      });
+      _resolverIAAtual.gabaritoOficial = gabaritoCorrigido;
+      _resolverIAAtual.gabaritoConfirmado = gabaritoCorrigido;
+      _resolverIAAtual.bruto = ia.bruto;
+      _resolverIAAtual.condensado = ia.condensado;
+      _renderResolverIAResultado(view);
+      showToast('Explicação regenerada.', 'success');
+    } catch (err) {
+      showToast(err.message || 'Não foi possível regenerar agora.', 'danger');
+      btn.disabled = false;
+      btn.textContent = '🔄 Regenerar explicação com esse gabarito';
+    }
+  });
+
+  $('#btn-descartar-ia').addEventListener('click', () => {
+    _resolverIAAtual = null;
+    renderResolverIA(view);
+  });
+
+  $('#btn-salvar-ia').addEventListener('click', async () => {
+    const gabaritoConfirmado = $('#ia-gabarito-confirmado').value.trim();
+    if (!gabaritoConfirmado) { showToast('Confirme o gabarito antes de salvar.', 'danger'); return; }
+    if (!r.resultado) { showToast('Marque se você acertou, errou ou deixou em branco.', 'danger'); return; }
+
+    const disciplina = $('#ia-disciplina').value.trim();
+    const assunto = $('#ia-assunto').value.trim();
+    const banca = $('#ia-banca').value.trim();
+    const concurso = $('#ia-concurso').value.trim();
+    const respostaMarcada = $('#ia-resposta-marcada').value.trim();
+
+    const acertos = r.resultado === 'certa' ? 1 : 0;
+    const erros = r.resultado === 'errada' ? 1 : 0;
+    const taxa = (acertos + erros) ? (acertos / (acertos + erros)) * 100 : 0;
+
+    const novaTentativaId = await db.tentativas.add({
+      disciplina, assunto, banca, concurso,
+      data: todayISO(),
+      numQuestoes: 1,
+      acertos, erros, taxa,
+      tipo: 'Questão avulsa (Resolver com IA)',
+      observacoes: '',
+      enunciado: r.enunciado,
+      resultado: r.resultado,
+      respostaMarcada: respostaMarcada || null,
+      gabaritoConfirmado
+    });
+
+    await db.resumos.add({
+      tentativaId: novaTentativaId,
+      materia: disciplina,
+      topico: assunto,
+      data: todayISO(),
+      textoBruto: r.bruto,
+      textoCondensado: r.condensado,
+      enviadoAnki: false,
+      ankiDeck: null
+    });
+
+    _resolverIAContagem[r.resultado === 'certa' ? 'certas' : r.resultado === 'errada' ? 'erradas' : 'brancos']++;
+    _resolverIASessao = { disciplina, assunto, banca, concurso };
+    _resolverIAAtual = null;
+
+    await reloadState();
+    updateStreakMini();
+    showToast('Questão registrada e resumo salvo no Caderno.', 'success');
+    renderResolverIA(view);
+    $('#ia-enunciado')?.focus();
+  });
+}
+
+/* ============================================================
+   TELA: CADERNO DE RESUMOS
+   ============================================================
+   Mostra state.resumos organizados em árvore Matéria -> Tópico, com as
+   entradas do tópico selecionado agrupadas por sessão (mesmo dia),
+   mais recente primeiro. Reaproveita a mesma normalização de nome usada em
+   calcRelatorioDiario, pra "Direito Constitucional" e "direito constitucional"
+   caírem no mesmo grupo.
+   ============================================================ */
+
+let _cadernoSelecao = { materia: null, topico: null };
+let _cadernoBusca = '';
+
+/** Agrupa state.resumos em { materia -> { topico -> [resumos] } }, com
+ *  contagem por nó, pronta pra desenhar a árvore da sidebar do Caderno. */
+function calcCadernoArvore() {
+  const norm = (s) => (s || '').trim().toLowerCase();
+  const arvore = new Map(); // chaveNorm materia -> { nome, topicos: Map(chaveNorm topico -> {nome, resumos:[]}) }
+
+  state.resumos.forEach(r => {
+    const nomeMateria = (r.materia || '').trim() || '(Sem matéria)';
+    const nomeTopico = (r.topico || '').trim() || '(Sem tópico)';
+    const chaveMateria = norm(nomeMateria);
+    const chaveTopico = norm(nomeTopico);
+
+    if (!arvore.has(chaveMateria)) arvore.set(chaveMateria, { nome: nomeMateria, topicos: new Map() });
+    const materiaNode = arvore.get(chaveMateria);
+
+    if (!materiaNode.topicos.has(chaveTopico)) materiaNode.topicos.set(chaveTopico, { nome: nomeTopico, resumos: [] });
+    materiaNode.topicos.get(chaveTopico).resumos.push(r);
+  });
+
+  return arvore;
+}
+
+function renderCaderno(view) {
+  const arvore = calcCadernoArvore();
+  const materias = Array.from(arvore.values()).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+
+  if (!materias.length) {
+    view.innerHTML = `
+      <div class="empty-state">
+        <p>Nenhum resumo no Caderno ainda.</p>
+        <p class="text-muted" style="font-size:13px;">Resolva questões na tela "Resolver com IA" para começar a preencher o Caderno automaticamente.</p>
+        <button class="btn btn-primary" id="empty-ir-resolver-ia">Ir para Resolver com IA</button>
+      </div>
+    `;
+    $('#empty-ir-resolver-ia').addEventListener('click', () => { location.hash = '#/resolver-ia'; });
+    return;
+  }
+
+  // Se nada selecionado ainda (ou seleção antiga não existe mais), seleciona a primeira matéria.
+  if (!_cadernoSelecao.materia || !arvore.has(norm2(_cadernoSelecao.materia))) {
+    _cadernoSelecao = { materia: materias[0].nome, topico: null };
+  }
+
+  view.innerHTML = `
+    <div class="caderno-layout">
+      <div class="caderno-sidebar" id="caderno-sidebar"></div>
+      <div class="caderno-main" id="caderno-main"></div>
+    </div>
+  `;
+
+  function norm2(s) { return (s || '').trim().toLowerCase(); }
+
+  function renderSidebar() {
+    const sidebar = $('#caderno-sidebar');
+    sidebar.innerHTML = materias.map(m => {
+      const aberta = norm2(m.nome) === norm2(_cadernoSelecao.materia);
+      const topicos = Array.from(m.topicos.values()).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'));
+      return `
+        <div class="caderno-materia">
+          <div class="caderno-materia-head" data-materia="${escapeHtml(m.nome)}">
+            <span class="arrow">${aberta ? '▾' : '▸'}</span> ${escapeHtml(m.nome)}
+          </div>
+          ${aberta ? `
+            <div class="caderno-topicos">
+              ${topicos.map(t => `
+                <div class="caderno-topico ${norm2(t.nome) === norm2(_cadernoSelecao.topico) ? 'active' : ''}" data-topico="${escapeHtml(t.nome)}">
+                  <span>${escapeHtml(t.nome)}</span><span class="count">${t.resumos.length}</span>
+                </div>
+              `).join('')}
+            </div>
+          ` : ''}
+        </div>
+      `;
+    }).join('');
+
+    $$('.caderno-materia-head', sidebar).forEach(el => el.addEventListener('click', () => {
+      const nome = el.dataset.materia;
+      _cadernoSelecao = norm2(_cadernoSelecao.materia) === norm2(nome)
+        ? { materia: null, topico: null }
+        : { materia: nome, topico: null };
+      renderSidebar();
+      renderMain();
+    }));
+    $$('.caderno-topico', sidebar).forEach(el => el.addEventListener('click', () => {
+      _cadernoSelecao.topico = el.dataset.topico;
+      renderSidebar();
+      renderMain();
+    }));
+  }
+
+  function renderMain() {
+    const main = $('#caderno-main');
+    const materiaNode = materias.find(m => norm2(m.nome) === norm2(_cadernoSelecao.materia));
+
+    if (!materiaNode) { main.innerHTML = `<p class="text-muted">Selecione uma matéria ao lado.</p>`; return; }
+
+    const topicoNode = _cadernoSelecao.topico
+      ? materiaNode.topicos.get(norm2(_cadernoSelecao.topico))
+      : null;
+
+    let resumos = topicoNode
+      ? topicoNode.resumos
+      : Array.from(materiaNode.topicos.values()).flatMap(t => t.resumos);
+
+    const termo = _cadernoBusca.trim().toLowerCase();
+    if (termo) {
+      resumos = resumos.filter(r =>
+        (r.textoBruto || '').toLowerCase().includes(termo) ||
+        (r.textoCondensado || '').toLowerCase().includes(termo)
+      );
+    }
+
+    resumos = [...resumos].sort((a, b) => (b.data || '').localeCompare(a.data || '') || (b.id - a.id));
+
+    // Agrupa por data só pra exibição (sessão = mesmo dia).
+    const porData = new Map();
+    resumos.forEach(r => {
+      const d = r.data || '(sem data)';
+      if (!porData.has(d)) porData.set(d, []);
+      porData.get(d).push(r);
+    });
+
+    main.innerHTML = `
+      <div class="flex" style="justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px;">
+        <div>
+          <div class="text-muted" style="font-size:12.5px;">${escapeHtml(materiaNode.nome)}</div>
+          <h2 style="margin:2px 0 0;font-size:19px;">${escapeHtml(topicoNode ? topicoNode.nome : 'Todos os tópicos')}</h2>
+        </div>
+        <input type="text" id="caderno-busca" class="search-input" style="max-width:260px;" placeholder="🔍 Buscar nos resumos..." value="${escapeHtml(_cadernoBusca)}">
+      </div>
+
+      ${!resumos.length ? `<p class="text-muted">Nenhum resumo encontrado.</p>` : Array.from(porData.entries()).map(([data, itens]) => `
+        <div class="sessao" style="margin-bottom:22px;">
+          <div class="flex" style="align-items:center;gap:10px;margin-bottom:10px;">
+            <span style="font-size:12px;color:var(--text-muted);background:var(--surface-2);padding:3px 10px;border-radius:999px;">${data === todayISO() ? 'Hoje' : toBRDate(data)}</span>
+            <div style="flex:1;height:1px;background:var(--border);"></div>
+          </div>
+          ${itens.map(r => {
+            const t = state.tentativas.find(x => x.id === r.tentativaId);
+            return `
+            <div class="card mb-12">
+              <div class="flex" style="justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:8px;">
+                <div style="font-size:12px;color:var(--text-muted);">
+                  ${t ? `<b style="color:var(--text)">${escapeHtml(t.disciplina)}</b> · <span class="badge ${t.resultado === 'certa' ? 'success' : t.resultado === 'errada' ? 'danger' : 'muted'}">${t.resultado === 'certa' ? 'Certa' : t.resultado === 'errada' ? 'Errada' : 'Branco'}</span>` : 'Resumo avulso'}
+                </div>
+                <button class="btn btn-sm ${r.enviadoAnki ? 'enviado' : ''}" data-enviar-anki="${r.id}" ${r.enviadoAnki ? 'disabled' : ''}>
+                  ${r.enviadoAnki ? '✓ Enviado ao Anki' : 'Enviar pro Anki'}
+                </button>
+              </div>
+              <p style="line-height:1.5;font-size:13.5px;color:var(--text);margin:8px 0;">${escapeHtml(r.textoBruto)}</p>
+              ${r.textoCondensado ? `<div style="border-left:2px solid var(--gold);padding-left:10px;color:var(--text-muted);font-size:13px;margin-top:10px;">📎 ${escapeHtml(r.textoCondensado)}</div>` : ''}
+            </div>
+          `; }).join('')}
+        </div>
+      `).join('')}
+    `;
+
+    $('#caderno-busca').addEventListener('input', (e) => {
+      _cadernoBusca = e.target.value;
+      renderMain();
+    });
+
+    $$('[data-enviar-anki]', main).forEach(btn => btn.addEventListener('click', () => {
+      // Fase 2 do roadmap (AnkiConnect) ainda não está plugada — placeholder por enquanto.
+      showToast('Integração com Anki ainda não configurada nesta tela (próxima fase do roadmap).', '');
+    }));
+  }
+
+  renderSidebar();
+  renderMain();
 }
 
 /* ============================================================
