@@ -1041,7 +1041,12 @@ function renderPrioridadeRevisao() {
 
     // Urgência usa pelo menos 1 "dia" no cálculo do score (revisar hoje ainda
     // conta como pouco urgente, mas não zera o score de disciplinas de peso alto).
-    const urgencia = (m.peso || 1) * (100 - taxa) * Math.max(1, diasSemRevisar);
+    // Estudado hoje ainda conta pra urgência (uma disciplina fraca não vira
+    // forte só por ter sido revisada uma vez), mas com um peso bem menor do
+    // que um dia inteiro sem revisar — evita empatar "estudei há 5 minutos"
+    // com "estudei ontem".
+    const fatorDias = diasSemRevisar === 0 ? 0.3 : diasSemRevisar;
+    const urgencia = (m.peso || 1) * (100 - taxa) * fatorDias;
 
     paraCalcular.push({ materia: m, nomeCiclo, taxa, totalQuestoes, diasSemRevisar, urgencia });
   });
